@@ -1,0 +1,162 @@
+# 05. 배포 슬롯 · 무중단 스왑 · 롤백
+
+> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **스크린샷** = 화면 확인
+
+---
+
+## 목표
+
+이 모듈에서는 Azure App Service **배포 슬롯(Deployment Slot)** 을 활용하여 코드를 스테이징 환경에 배포한 뒤, 프로덕션과 무중단으로 교체(스왑)하는 흐름과 즉각 롤백 방법을 실습합니다.
+
+- 스테이징 슬롯을 생성하고 v2(초록 `#16a34a`)를 배포합니다.
+- `az webapp deployment slot swap` 명령으로 프로덕션 ↔ 스테이징을 무중단 전환합니다.
+- 문제 발견 가정 후 **재스왑 한 번**으로 v1(파랑 `#2563eb`)을 즉시 복원합니다.
+- 모듈 종료 상태: **production = v1, staging = v2** (06 모듈에서 이 v2를 카나리로 승격합니다).
+
+## 소요 시간
+
+약 10–15분
+
+---
+
+## 각 모듈 첫머리 변수 재설정 블록
+
+> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+
+```bash
+# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
+SUFFIX=<이전에_메모한_값>
+LOC=koreacentral
+RG=rg-appsvcworkshop-$SUFFIX
+PLAN=plan-appsvcworkshop-$SUFFIX
+APP=app-appsvcworkshop-$SUFFIX
+LAW=log-appsvcworkshop-$SUFFIX
+APPI=appi-appsvcworkshop-$SUFFIX
+APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+```
+
+---
+
+## 1단계 — 스테이징 슬롯 생성
+
+🟢 **실행**
+
+```bash
+az webapp deployment slot create -g $RG -n $APP --slot staging --configuration-source $APP
+```
+
+> 👁️ **개념 — `--configuration-source`**
+>
+> `--configuration-source $APP`를 지정하면 프로덕션 슬롯의 **앱 설정을 그대로 복제**하여 스테이징 슬롯을 초기화합니다. 이후 슬롯 고정 설정(`--slot-settings`)을 추가하면 스왑 후에도 해당 슬롯에만 남는 설정(예: staging 전용 DB 연결 문자열)을 분리할 수 있습니다.
+
+---
+
+## 2단계 — v2 소스 준비 및 스테이징 배포
+
+🟢 **실행**
+
+```bash
+cd ~/ms-appservice-basic-workshop01/app
+sed -i 's#^VERSION = "v1"#VERSION = "v2"#' app.py
+grep '^VERSION' app.py   # VERSION = "v2" 확인(치환 검증 — 미치환 방지)
+zip -r /tmp/app-v2.zip . -x "tests/*" -x "__pycache__/*" -x "*.pyc"
+git checkout -- app.py   # 로컬 소스는 v1로 원복
+
+az webapp deploy -g $RG -n $APP --slot staging --src-path /tmp/app-v2.zip --type zip --track-status
+
+STG_URL="https://$(az webapp deployment slot list -g $RG -n $APP \
+  --query "[?name=='staging'].defaultHostName | [0]" -o tsv)"
+curl -s $STG_URL/api/info | jq '{version, slot}'
+```
+
+> 👁️ **sed 구분자 `#` 사용 이유** — 기본 구분자 `/`는 파일 경로와 충돌할 수 있습니다. `VERSION` 값에 `/`가 없더라도 `#`을 구분자로 사용하는 것이 안전한 관례입니다. `grep '^VERSION' app.py`는 치환이 실제로 적용되었는지 확인하는 안전 단계로, `VERSION = "v2"`가 출력되어야 합니다.
+
+📋 **예상 출력**
+
+```json
+{
+  "version": "v2",
+  "slot": "staging"
+}
+```
+
+🖼️ **스크린샷** — 브라우저에서 `$STG_URL`을 열면 **초록(`#16a34a`)** 배경의 v2 화면이, `$APP_URL`을 열면 **파랑(`#2563eb`)** 배경의 v1 화면이 표시됩니다.
+
+---
+
+## 3단계 — 스왑: production ← v2
+
+> 👁️ **스왑 동작 원리**
+>
+> `az webapp deployment slot swap`은 코드를 재배포하지 않고 **라우팅을 교환**합니다. 전환 전 대상 슬롯이 워밍업(헬스 체크 통과)을 완료한 뒤 전환이 이루어지므로 다운타임이 없습니다. 롤백은 재스왑 한 번이면 충분합니다.
+
+🟢 **실행**
+
+```bash
+az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
+curl -s $APP_URL/api/info | jq -r .version    # v2 — 무중단 전환
+curl -s $STG_URL/api/info | jq -r .version    # v1 — 이전 버전이 슬롯에 보존
+```
+
+📋 **예상 출력**
+
+```
+v2
+v1
+```
+
+---
+
+## 4단계 — 롤백: 재스왑으로 v1 즉시 복원
+
+> 👁️ 운영 중 문제가 발견되면 아래처럼 재스왑 한 번으로 이전 버전을 즉시 프로덕션에 복원할 수 있습니다. 별도의 재배포가 필요 없는 이유는 v1 바이너리가 이미 staging 슬롯에 보존되어 있기 때문입니다.
+
+🟢 **실행**
+
+```bash
+# 문제 발견 가정 → 재스왑 = 즉시 롤백
+az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
+curl -s $APP_URL/api/info | jq -r .version    # v1
+```
+
+📋 **예상 출력**
+
+```
+v1
+```
+
+> 👁️ 롤백 완료 후 종료 상태: **production = v1(파랑 `#2563eb`)**, **staging = v2(초록 `#16a34a`)**. 06 모듈에서 이 v2를 카나리로 승격합니다.
+
+---
+
+## 검증
+
+| 확인 항목 | 기대 결과 |
+|-----------|-----------|
+| `curl $STG_URL/api/info` 의 `version` 필드 | `"v2"` |
+| `curl $STG_URL/api/info` 의 `slot` 필드 | `"staging"` |
+| 1차 스왑 후 `curl $APP_URL/api/info \| jq -r .version` | `v2` |
+| 1차 스왑 후 `curl $STG_URL/api/info \| jq -r .version` | `v1` |
+| 재스왑(롤백) 후 `curl $APP_URL/api/info \| jq -r .version` | `v1` |
+| 브라우저 `$APP_URL` (최종) | 파랑(`#2563eb`) v1 화면 |
+| 브라우저 `$STG_URL` (최종) | 초록(`#16a34a`) v2 화면 |
+
+---
+
+## 트러블슈팅
+
+### (1) sed 치환이 적용되지 않음
+
+`grep '^VERSION' app.py` 출력이 `VERSION = "v1"` 그대로라면 패턴이 일치하지 않은 것입니다. 파일의 줄 끝 문자(CRLF)나 인코딩(UTF-8 BOM)을 확인하고, 패턴을 재조정합니다. `cat -A app.py | grep VERSION` 으로 숨김 문자를 확인할 수 있습니다.
+
+### (2) 슬롯 콜드스타트 — curl 응답이 느리거나 502 오류
+
+스테이징 슬롯을 처음 배포한 후에는 콜드스타트가 발생할 수 있습니다. 배포 완료 후 **30–60초** 대기하거나 `curl`을 재시도합니다.
+
+### (3) 스왑 지연 — 명령이 완료되지 않음
+
+App Service는 스왑 전 새 슬롯이 **HTTP 200**을 반환할 때까지 워밍업을 기다립니다. 앱 시작 시간이 긴 경우 수 분이 소요될 수 있습니다. Portal의 **배포 슬롯 → 슬롯 교환** 화면에서 진행 상태를 모니터링합니다.
+
+---
+
+이전 모듈: [04. 앱 설정·환경변수](04-app-settings.md) | 다음 모듈: [06. 트래픽 분할·카나리](06-traffic-split-canary.md)
