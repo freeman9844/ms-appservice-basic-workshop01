@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+*.zip
+.env
+.DS_Store
+docs/superpowers/
