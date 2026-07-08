@@ -73,14 +73,13 @@ az webapp update -g $RG -n $APP --prewarmed-instance-count 1 --minimum-elastic-i
 
 ## 2단계 — hey 부하 도구 설치
 
-> 👁️ Cloud Shell은 `sudo`가 차단되어 있으므로 시스템 디렉터리에 바이너리를 설치할 수 없습니다. `$HOME/.local/bin`을 사용합니다.
+> 👁️ Cloud Shell에는 Go가 사전 설치되어 있으므로 `go install`로 hey를 빌드합니다. (`hey`의 S3 사전 빌드 바이너리 배포는 현재 접근 불가 상태입니다.)
 
 🟢 **실행**
 
 ```bash
-mkdir -p $HOME/.local/bin && export PATH=$HOME/.local/bin:$PATH
-curl -sL https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64 -o $HOME/.local/bin/hey
-chmod +x $HOME/.local/bin/hey
+go install github.com/rakyll/hey@latest
+export PATH=$HOME/go/bin:$PATH
 ```
 
 설치가 완료되면 실행 가능한지 확인합니다(`hey`는 `--version` 플래그가 없으므로 도움말 출력으로 확인).
@@ -195,11 +194,12 @@ kill %1
 
 ### (3) hey 설치 실패
 
-네트워크 일시 장애일 수 있습니다. 동일한 `curl` 명령을 재시도합니다.
+`go install`은 GitHub에서 소스를 받아 빌드하므로 네트워크 일시 장애일 수 있습니다. 잠시 후 재시도하고, PATH에 `$HOME/go/bin`이 포함되어 있는지 확인합니다.
 
 ```bash
-curl -sL https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64 -o $HOME/.local/bin/hey
-chmod +x $HOME/.local/bin/hey
+go install github.com/rakyll/hey@latest
+export PATH=$HOME/go/bin:$PATH
+command -v hey
 ```
 
 ---

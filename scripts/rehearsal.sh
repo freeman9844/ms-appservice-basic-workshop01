@@ -88,8 +88,8 @@ az webapp update -g "$RG" -n "$APP" --prewarmed-instance-count 1 \
   --minimum-elastic-instance-count 1 -o none
 mkdir -p "$HOME/.local/bin"; export PATH="$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
-  curl -sL https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64 \
-    -o "$HOME/.local/bin/hey" && chmod +x "$HOME/.local/bin/hey"; }
+  go install github.com/rakyll/hey@latest
+  export PATH="$HOME/go/bin:$PATH"; }
 hey -z 120s -c 100 -q 10 "$APP_URL/api/info" > /tmp/hey.out &
 HEY_PID=$!
 sleep 90
