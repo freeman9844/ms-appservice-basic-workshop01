@@ -246,7 +246,7 @@ time curl -s "$APP_URL/slow?sec=5" > /dev/null
 
 ### (2) `/api/info` 또는 `/slow` 엔드포인트 403 응답
 
-Easy Auth가 아직 활성 상태입니다. 1단계 명령을 재실행합니다.
+Easy Auth가 아직 활성 상태입니다(모듈 09 수행자만 해당). 1단계 명령을 재실행합니다.
 
 ```bash
 az webapp auth update -g $RG -n $APP --enabled false
