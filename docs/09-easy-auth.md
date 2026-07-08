@@ -1,4 +1,4 @@
-# 09. Easy Auth(Entra ID 로그인 게이트)
+# 09. (선택) Easy Auth(Entra ID 로그인 게이트)
 
 > 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
@@ -6,7 +6,7 @@
 
 ## 목표
 
-이 모듈에서는 Azure App Service의 **Easy Auth** 기능을 구성하여 코드 수정 없이 Entra ID(구 Azure AD) 로그인 게이트를 활성화합니다. Entra 앱 등록을 생성하고 OAuth 2.0 / OpenID Connect 설정을 App Service에 연결한 뒤, 브라우저에서 인증 흐름을 확인합니다.
+이 모듈은 **선택 모듈**입니다. Azure App Service의 **Easy Auth** 기능을 구성하여 코드 수정 없이 Entra ID(구 Azure AD) 로그인 게이트를 활성화합니다. Entra 앱 등록을 생성하고 OAuth 2.0 / OpenID Connect 설정을 App Service에 연결한 뒤, 브라우저에서 인증 흐름을 확인합니다. 건너뛰어도 이후 모듈(10·11·12) 진행에 지장이 없습니다.
 
 - Entra 앱 등록(`CLIENT_ID`)을 생성하고 리디렉션 URI를 구성합니다.
 - `authV2` 확장으로 Easy Auth를 활성화하여 미인증 요청을 로그인 페이지로 리디렉션합니다.
@@ -23,7 +23,7 @@ flowchart LR
     EA -.->|"OAuth 2.0 / OIDC"| EID["Entra ID<br/>(앱 등록: auth-appsvcworkshop-SUFFIX)"]
 ```
 
-> ⚠️ **이후 선택 모듈(10·11)은 curl 검증을 위해 첫머리에서 Easy Auth를 일시 비활성화합니다.** 해당 모듈 안내에 따라 auth를 껐다 켜십시오.
+> ⚠️ **이후 선택 모듈(10·11)은 curl 검증을 위해 첫머리에서 Easy Auth를 일시 비활성화합니다.** 해당 모듈 안내에 따라 auth를 껐다 켜십시오. 이 모듈을 마친 뒤에는 [12. 정리](12-cleanup.md)에서 **Entra 앱 등록 삭제 단계(모듈 09 수행자만)**를 잊지 마세요.
 
 ---
 
@@ -233,4 +233,4 @@ az extension add --name authV2 --upgrade --only-show-errors
 
 ---
 
-이전 모듈: [08. 관찰 가능성](08-observability.md) · 다음 모듈: [10. Sidecar(선택)](10-sidecar-option.md)
+이전 모듈: [08. 관찰 가능성](08-observability.md) · 다음 모듈: [10. Sidecar(선택)](10-sidecar-option.md) 또는 [12. 정리](12-cleanup.md)

@@ -13,7 +13,7 @@
 - `/cache` 엔드포인트로 사이드카 부착 전후 동작 차이를 확인합니다.
 - `az webapp sitecontainers create` 명령으로 Redis 사이드카를 부착합니다.
 - 사이드카 개념(localhost 공유, 활용 예)과 Azure Container Apps(ACA) 대응 패턴을 이해합니다.
-- 모듈 종료 상태: **Redis 사이드카 부착·`/cache` 동작 중, Easy Auth 비활성**
+- 모듈 종료 상태: **Redis 사이드카 부착·`/cache` 동작 중** (모듈 09 수행자는 Easy Auth 비활성 상태)
 
 완성 후의 구조는 다음과 같습니다.
 
@@ -29,7 +29,7 @@ flowchart LR
 
 ## 0단계 — (선택) 변수 재설정
 
-> ⏭️ **09 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> ⏭️ **이전 모듈(08 또는 09)에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
 > 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
 > `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
 
@@ -68,9 +68,11 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 
 ---
 
-## 1단계 — Easy Auth 일시 비활성화
+## 1단계 — Easy Auth 일시 비활성화(모듈 09 수행자만)
 
-모듈 09에서 Easy Auth가 활성화된 상태입니다. curl로 `/cache` 엔드포인트를 테스트하려면 인증 게이트를 일시적으로 해제해야 합니다.
+> ⏭️ **모듈 09(선택)를 건너뛰었다면 이 단계도 건너뛰고 2단계로 이동하세요.**
+
+모듈 09에서 Easy Auth를 활성화한 경우, curl로 `/cache` 엔드포인트를 테스트하려면 인증 게이트를 일시적으로 해제해야 합니다.
 
 🟢 **실행**
 
@@ -168,9 +170,9 @@ curl -s $APP_URL/cache | jq   # visits 증가 확인
 
 ---
 
-## 5단계 — Easy Auth 재활성화 안내
+## 5단계 — Easy Auth 재활성화 안내(모듈 09 수행자만)
 
-> 👁️ Easy Auth를 다시 활성화하려면 아래 명령을 실행하십시오. **다음 모듈 11(선택)로 진행하는 경우 11 첫머리에서 다시 비활성화하므로 지금 재활성화를 생략해도 됩니다.**
+> 👁️ Easy Auth를 다시 활성화하려면 아래 명령을 실행하십시오. **다음 모듈 11(선택)로 진행하는 경우 11 첫머리에서 다시 비활성화하므로 지금 재활성화를 생략해도 됩니다.** 모듈 09를 건너뛴 참가자는 이 단계도 건너뛰세요.
 
 ```bash
 az webapp auth update -g $RG -n $APP --enabled true
@@ -268,4 +270,4 @@ az rest --method put \
 
 ---
 
-이전 모듈: [09. Easy Auth](09-easy-auth.md) · 다음 모듈: [11. Auto Heal(선택)](11-autoheal-option.md) 또는 [12. 정리](12-cleanup.md)
+이전 모듈: [09. (선택) Easy Auth](09-easy-auth.md) · 다음 모듈: [11. Auto Heal(선택)](11-autoheal-option.md) 또는 [12. 정리](12-cleanup.md)

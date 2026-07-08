@@ -252,4 +252,4 @@ az extension add --name application-insights --upgrade --only-show-errors
 
 ---
 
-이전 모듈: [07. 자동 스케일](07-autoscale.md) · 다음 모듈: [09. Easy Auth](09-easy-auth.md)
+이전 모듈: [07. 자동 스케일](07-autoscale.md) · 다음 모듈: [09. (선택) Easy Auth](09-easy-auth.md) 또는 [12. 정리](12-cleanup.md)
