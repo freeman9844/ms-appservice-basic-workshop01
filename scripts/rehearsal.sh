@@ -11,13 +11,13 @@ LAW="log-appsvcworkshop-$SUFFIX"
 APPI="appi-appsvcworkshop-$SUFFIX"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "===== [00] SUFFIX=$SUFFIX RG=$RG ====="
+echo "===== [00] SUFFIX=$SUFFIX RG=$RG ($(date +%T)) ====="
 
-echo "===== [01] 확장 설치 ====="
+echo "===== [01] 확장 설치 ($(date +%T)) ====="
 az extension add --name application-insights --upgrade --only-show-errors
 az extension add --name authV2 --upgrade --only-show-errors
 
-echo "===== [02] RG + Plan(P0v3) + Web App + LAW + App Insights ====="
+echo "===== [02] RG + Plan(P0v3) + Web App + LAW + App Insights ($(date +%T)) ====="
 az group create -n "$RG" -l "$LOC" -o none
 az appservice plan create -g "$RG" -n "$PLAN" --is-linux --sku P0V3 -o none
 az webapp create -g "$RG" -n "$APP" --plan "$PLAN" --runtime "PYTHON:3.12" -o none
@@ -29,7 +29,7 @@ az monitor app-insights component create -g "$RG" --app "$APPI" -l "$LOC" \
 APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
 echo "APP_URL=$APP_URL"
 
-echo "===== [03] zip deploy (v1) ====="
+echo "===== [03] zip deploy (v1) ($(date +%T)) ====="
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true -o none
 ( cd "$REPO_DIR/app" && zip -qr /tmp/app-v1.zip . -x "tests/*" -x "__pycache__/*" -x "*.pyc" )
@@ -41,7 +41,7 @@ done
 curl -s "$APP_URL/api/info"; echo
 [ "$(curl -s "$APP_URL/api/info" | jq -r .version)" = "v1" ] && echo "[03] OK v1"
 
-echo "===== [04] 앱 설정 → 재시작 관찰 ====="
+echo "===== [04] 앱 설정 → 재시작 관찰 ($(date +%T)) ====="
 BEFORE=$(curl -s "$APP_URL/api/info" | jq -r .started_at)
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings WELCOME_MESSAGE="안녕하세요, App Service 워크숍!" -o none
@@ -49,7 +49,7 @@ sleep 40
 AFTER=$(curl -s "$APP_URL/api/info" | jq -r .started_at)
 [ "$BEFORE" != "$AFTER" ] && echo "[04] OK 재시작 확인 ($BEFORE → $AFTER)"
 
-echo "===== [05] staging 슬롯 + v2 배포 + swap/롤백 ====="
+echo "===== [05] staging 슬롯 + v2 배포 + swap/롤백 ($(date +%T)) ====="
 az webapp deployment slot create -g "$RG" -n "$APP" --slot staging \
   --configuration-source "$APP" -o none
 sed -i 's#^VERSION = "v1"#VERSION = "v2"#' "$REPO_DIR/app/app.py"
@@ -69,7 +69,7 @@ az webapp deployment slot swap -g "$RG" -n "$APP" --slot staging --target-slot p
 az webapp deployment slot swap -g "$RG" -n "$APP" --slot staging --target-slot production
 [ "$(curl -s "$APP_URL/api/info" | jq -r .version)" = "v1" ] && echo "[05] 롤백 OK (prod=v1)"
 
-echo "===== [06] 트래픽 분할 카나리 (staging 20%) ====="
+echo "===== [06] 트래픽 분할 카나리 (staging 20%) ($(date +%T)) ====="
 az webapp traffic-routing set -g "$RG" -n "$APP" --distribution staging=20
 sleep 10
 count_v2=0
@@ -81,7 +81,7 @@ az webapp traffic-routing clear -g "$RG" -n "$APP"
 az webapp deployment slot swap -g "$RG" -n "$APP" --slot staging --target-slot production
 [ "$(curl -s "$APP_URL/api/info" | jq -r .version)" = "v2" ] && echo "[06] 승격 OK (prod=v2)"
 
-echo "===== [07] Automatic scaling + hey 부하 ====="
+echo "===== [07] Automatic scaling + hey 부하 ($(date +%T)) ====="
 az appservice plan update -g "$RG" -n "$PLAN" --elastic-scale true \
   --max-elastic-worker-count 5 -o none
 az webapp update -g "$RG" -n "$APP" --prewarmed-instance-count 1 \
@@ -99,7 +99,7 @@ echo "[07] 부하 중 인스턴스 수: $INSTANCES (기대 ≥2)"
 wait "$HEY_PID" || true
 echo "[07] 부하 제거 — scale-in은 수 분 후 az webapp list-instances로 확인(KEEP=1 권장)"
 
-echo "===== [08] 진단 설정 + KQL + App Insights ====="
+echo "===== [08] 진단 설정 + KQL + App Insights ($(date +%T)) ====="
 WEBAPP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 az monitor diagnostic-settings create --name appsvc-diag --resource "$WEBAPP_ID" \
   --workspace "$LAW_ID" \
@@ -117,7 +117,7 @@ az monitor log-analytics query -w "$LAW_CID" --analytics-query \
   'AppServiceHTTPLogs | where TimeGenerated > ago(30m) | summarize hits=count() by CsUriStem | order by hits desc' \
   -o table || echo "[08] 적재 지연 — KEEP=1이면 포털에서 재확인"
 
-echo "===== [09] Easy Auth (미인증 리디렉션 확인까지) ====="
+echo "===== [09] Easy Auth (미인증 리디렉션 확인까지) ($(date +%T)) ====="
 TENANT_ID=$(az account show --query tenantId -o tsv)
 CLIENT_ID=$(az ad app create --display-name "auth-appsvcworkshop-$SUFFIX" \
   --web-redirect-uris "$APP_URL/.auth/login/aad/callback" \
@@ -125,32 +125,33 @@ CLIENT_ID=$(az ad app create --display-name "auth-appsvcworkshop-$SUFFIX" \
 az ad app update --id "$CLIENT_ID" --enable-id-token-issuance true
 CLIENT_SECRET=$(az ad app credential reset --id "$CLIENT_ID" --display-name easyauth \
   --query password -o tsv)
+az webapp auth config-version upgrade -g "$RG" -n "$APP" -o none
 az webapp auth microsoft update -g "$RG" -n "$APP" \
   --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET" \
   --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes -o none
 az webapp auth update -g "$RG" -n "$APP" --enabled true \
   --action RedirectToLoginPage --redirect-provider azureActiveDirectory -o none
-sleep 20
-code=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/")
-echo "[09] 미인증 응답: $code (기대 302)"
+sleep 40
+code_api=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/")
+code_html=$(curl -s -o /dev/null -w "%{http_code}" -H "User-Agent: Mozilla/5.0" "$APP_URL/")
+echo "[09] 미인증 응답: API=$code_api (기대 401) / 브라우저 UA=$code_html (기대 302)"
 
 if [ "${SKIP_OPTIONAL:-0}" != "1" ]; then
-  echo "===== [10] Redis 사이드카 ====="
+  echo "===== [10] Redis 사이드카 ($(date +%T)) ====="
   az webapp auth update -g "$RG" -n "$APP" --enabled false -o none
   az webapp sitecontainers create -g "$RG" -n "$APP" --container-name redis \
-    --image mcr.microsoft.com/mirror/docker/library/redis:7.4 --is-main false
+    --image mcr.microsoft.com/mirror/docker/library/redis:7.2 --is-main false
   az webapp restart -g "$RG" -n "$APP"
   sleep 60
   curl -s "$APP_URL/cache"; echo
   [ "$(curl -s "$APP_URL/cache" | jq -r .cache)" = "ok" ] && echo "[10] 사이드카 OK"
 
-  echo "===== [11] Auto-heal ====="
-  az webapp config set -g "$RG" -n "$APP" --generic-configurations '{
-    "autoHealEnabled": true,
-    "autoHealRules": {
-      "triggers": {"slowRequests": {"count": 5, "timeInterval": "00:02:00", "timeTaken": "00:00:03"}},
-      "actions": {"actionType": "Recycle", "minProcessExecutionTime": "00:01:00"}
-    }}' -o none
+  echo "===== [11] Auto-heal ($(date +%T)) ====="
+  az resource update -g "$RG" --resource-type "Microsoft.Web/sites/config" \
+    --name "$APP/config/web" \
+    --set properties.autoHealEnabled=true \
+    "properties.autoHealRules={\"triggers\":{\"slowRequests\":{\"count\":5,\"timeInterval\":\"00:02:00\",\"timeTaken\":\"00:00:03\"}},\"actions\":{\"actionType\":\"Recycle\",\"minProcessExecutionTime\":\"00:01:00\"}}" \
+    -o none
   sleep 90   # minProcessExecutionTime 경과 대기
   BEFORE=$(curl -s "$APP_URL/api/info" | jq -r .started_at)
   for i in $(seq 1 6); do curl -s "$APP_URL/slow?sec=5" > /dev/null; echo "slow $i/6"; done
@@ -160,7 +161,7 @@ if [ "${SKIP_OPTIONAL:-0}" != "1" ]; then
     || echo "[11] ⚠️ 재활용 미관찰 — 임계값/대기시간 재실측 필요"
 fi
 
-echo "===== [12] 정리 ====="
+echo "===== [12] 정리 ($(date +%T)) ====="
 if [ "${KEEP:-0}" = "1" ]; then
   echo "KEEP=1 — 삭제 생략. 수동 정리: az group delete -n $RG --yes; az ad app delete --id $CLIENT_ID"
 else

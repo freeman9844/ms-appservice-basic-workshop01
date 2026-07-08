@@ -81,7 +81,8 @@ curl -s $APP_URL/cache | jq
 ```json
 {
   "cache": "unavailable",
-  "message": "Redis에 연결할 수 없습니다."
+  "hint": "Redis 사이드카가 없습니다. 모듈 10을 참고하세요.",
+  "redis_host": "localhost"
 }
 ```
 
@@ -95,7 +96,7 @@ curl -s $APP_URL/cache | jq
 
 ```bash
 az webapp sitecontainers create -g $RG -n $APP --container-name redis \
-  --image mcr.microsoft.com/mirror/docker/library/redis:7.4 --is-main false
+  --image mcr.microsoft.com/mirror/docker/library/redis:7.2 --is-main false
 az webapp restart -g $RG -n $APP
 ```
 
@@ -114,7 +115,7 @@ az webapp sitecontainers list -g $RG -n $APP -o table
 ```
 Name    Image                                                      IsMain
 ------  ---------------------------------------------------------  --------
-redis   mcr.microsoft.com/mirror/docker/library/redis:7.4         False
+redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
 ```
 
 ---
@@ -134,6 +135,7 @@ curl -s $APP_URL/cache | jq   # visits 증가 확인
 ```json
 {
   "cache": "ok",
+  "redis_host": "localhost",
   "visits": 1
 }
 ```
@@ -143,6 +145,7 @@ curl -s $APP_URL/cache | jq   # visits 증가 확인
 ```json
 {
   "cache": "ok",
+  "redis_host": "localhost",
   "visits": 2
 }
 ```
@@ -208,7 +211,7 @@ az upgrade --only-show-errors
 ```bash
 az rest --method put \
   --url "https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/sitecontainers/redis?api-version=2024-04-01" \
-  --body '{"properties":{"image":"mcr.microsoft.com/mirror/docker/library/redis:7.4","isMain":false}}'
+  --body '{"properties":{"image":"mcr.microsoft.com/mirror/docker/library/redis:7.2","isMain":false}}'
 ```
 
 ---

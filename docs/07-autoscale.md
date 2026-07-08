@@ -83,10 +83,16 @@ curl -sL https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64 -o $HOME
 chmod +x $HOME/.local/bin/hey
 ```
 
-설치가 완료되면 버전을 확인합니다.
+설치가 완료되면 실행 가능한지 확인합니다(`hey`는 `--version` 플래그가 없으므로 도움말 출력으로 확인).
 
 ```bash
-hey --version
+hey 2>&1 | head -1
+```
+
+📋 **예상 출력**
+
+```
+Usage: hey [options...] <url>
 ```
 
 ---
@@ -172,7 +178,7 @@ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
 `-c` 값을 높여 동시 연결 수를 늘려 보십시오(예: `-c 200`). 또한 플랜에 Elastic scale이 정상 활성화되었는지 확인합니다.
 
 ```bash
-az appservice plan show -g $RG -n $PLAN --query "elasticScaleEnabled" -o tsv
+az appservice plan show -g $RG -n $PLAN --query "properties.elasticScaleEnabled" -o tsv
 ```
 
 값이 `true`가 아닌 경우 1단계 명령을 재실행합니다.

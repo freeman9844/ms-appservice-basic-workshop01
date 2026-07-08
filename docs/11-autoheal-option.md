@@ -87,13 +87,32 @@ az webapp list-instances -g $RG -n $APP -o table
 🟢 **실행** — Auto-heal 규칙을 설정합니다. 2분 이내에 3초를 초과하는 요청이 5회 이상 발생하면 워커 프로세스를 재활용합니다.
 
 ```bash
-az webapp config set -g $RG -n $APP --generic-configurations '{
-  "autoHealEnabled": true,
-  "autoHealRules": {
-    "triggers": {"slowRequests": {"count": 5, "timeInterval": "00:02:00", "timeTaken": "00:00:03"}},
-    "actions": {"actionType": "Recycle", "minProcessExecutionTime": "00:01:00"}
-  }}'
+az resource update -g $RG --resource-type "Microsoft.Web/sites/config" \
+  --name "$APP/config/web" \
+  --set properties.autoHealEnabled=true \
+  "properties.autoHealRules={\"triggers\":{\"slowRequests\":{\"count\":5,\"timeInterval\":\"00:02:00\",\"timeTaken\":\"00:00:03\"}},\"actions\":{\"actionType\":\"Recycle\",\"minProcessExecutionTime\":\"00:01:00\"}}" \
+  --query "properties.autoHealRules" -o json
 ```
+
+📋 **예상 출력 (일부)**
+
+```json
+{
+  "actions": {
+    "actionType": "Recycle",
+    "minProcessExecutionTime": "00:01:00"
+  },
+  "triggers": {
+    "slowRequests": {
+      "count": 5,
+      "timeInterval": "00:02:00",
+      "timeTaken": "00:00:03"
+    }
+  }
+}
+```
+
+> ⚠️ `az webapp config set --generic-configurations`로 중첩 JSON을 전달하면 `slowRequests` 트리거가 적용되지 않는 문제가 있어(부분 병합), 이 모듈에서는 `az resource update`로 사이트 구성 리소스를 직접 갱신합니다. 또한 `autoHealRules`가 아직 설정된 적 없는(null) 앱에서는 `properties.autoHealRules.triggers...`처럼 중첩 경로로 `--set`하면 `Couldn't find 'triggers' in 'properties.autoHealRules'` 오류가 발생하므로, 위 명령처럼 **`autoHealRules` 객체 전체를 한 번에 설정**합니다.
 
 > 👁️ `minProcessExecutionTime: "00:01:00"`이 설정되어 있으므로, 규칙 적용 후 최소 **90초** 대기 후 기준값을 측정하는 것이 권장됩니다.
 
@@ -113,7 +132,7 @@ curl -s $APP_URL/api/info | jq -r .started_at
 📋 **예상 출력 (예시)**
 
 ```
-2025-07-07T08:10:23.456789
+2026-07-08T02:38:14+00:00
 ```
 
 > 👁️ 이 값을 메모해 두십시오. 4단계에서 이 값이 변경되는지 확인합니다.
@@ -160,10 +179,10 @@ curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로�
 📋 **예상 출력 — 재활용 성공 시 (예시)**
 
 ```
-2025-07-07T08:12:01.123456
+2026-07-08T02:41:53+00:00
 ```
 
-> ⚠️ **리허설 확인**: Linux Auto-heal 지원 여부와 임계값이 결정적으로 트리거되는 값은 리허설에서 실측으로 확인 후 `count`/`timeTaken` 값을 조정합니다.
+> 👁️ 위 예시는 리허설 실측값입니다 — 슬로우 요청 6회 전송 후 약 90초 뒤 `started_at`이 2단계 기록값(`02:38:14`)에서 새 시각(`02:41:53`)으로 변경되어 워커 프로세스 재활용이 확인되었습니다.
 
 > 👁️ 2단계에서 기록한 값보다 이 값이 더 나중 시각이면 워커 프로세스가 자동으로 재활용된 것입니다. 값이 동일하면 아직 재활용이 완료되지 않았거나 트리거가 충족되지 않은 것입니다.
 
@@ -188,7 +207,7 @@ curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로�
 |---|---|
 | `az webapp auth update --enabled false` | 명령 오류 없이 JSON 출력 |
 | `az webapp list-instances` | 인스턴스 1개 확인 |
-| `az webapp config set --generic-configurations` | 오류 없이 구성 적용 |
+| `az resource update` (Auto-heal 규칙) | `slowRequests` 트리거 포함 JSON 출력 |
 | 2단계 `started_at` 기록 | 타임스탬프 값 메모 완료 |
 | 3단계 슬로우 요청 6회 전송 | `slow 1/6` … `slow 6/6` 순서대로 출력 |
 | 4단계 `started_at` 재확인 | 2단계 값보다 나중 시각(프로세스 재활용 확인) |
@@ -219,22 +238,17 @@ Easy Auth가 아직 활성 상태입니다. 0단계 명령을 재실행합니다
 az webapp auth update -g $RG -n $APP --enabled false
 ```
 
-### (3) `az webapp config set --generic-configurations` 오류
+### (3) `az resource update` 오류 — 규칙이 적용되지 않음
 
-JSON 형식 오류일 가능성이 있습니다. Cloud Shell에서 단일 따옴표 내 이중 따옴표 JSON이 지원되지 않는 경우 파일로 분리합니다.
+`--set` 인자의 JSON 이스케이프 오류일 가능성이 있습니다. 적용된 구성을 확인하고, `slowRequests`가 `null`이면 명령을 다시 실행합니다.
 
 ```bash
-cat > autoheal.json << 'EOF'
-{
-  "autoHealEnabled": true,
-  "autoHealRules": {
-    "triggers": {"slowRequests": {"count": 5, "timeInterval": "00:02:00", "timeTaken": "00:00:03"}},
-    "actions": {"actionType": "Recycle", "minProcessExecutionTime": "00:01:00"}
-  }
-}
-EOF
-az webapp config set -g $RG -n $APP --generic-configurations @autoheal.json
+az webapp config show -g $RG -n $APP --query "{enabled:autoHealEnabled}" -o json
+az resource show -g $RG --resource-type "Microsoft.Web/sites/config" \
+  --name "$APP/config/web" --query "properties.autoHealRules" -o json
 ```
+
+> ⚠️ `az webapp config set --generic-configurations`로 중첩 JSON을 전달하는 방식은 `slowRequests` 트리거가 무시되는 문제가 있으므로 사용하지 않습니다(1단계 참고).
 
 ### (4) `jq: error` 또는 started_at 필드 없음
 

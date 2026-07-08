@@ -81,6 +81,7 @@ echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 12 정리에서 필요 — 메모
 🟢 **실행** — Microsoft 공급자를 구성한 뒤 Easy Auth를 활성화합니다.
 
 ```bash
+az webapp auth config-version upgrade -g $RG -n $APP
 az webapp auth microsoft update -g $RG -n $APP \
   --client-id $CLIENT_ID --client-secret "$CLIENT_SECRET" \
   --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes
@@ -88,21 +89,23 @@ az webapp auth update -g $RG -n $APP --enabled true \
   --action RedirectToLoginPage --redirect-provider azureActiveDirectory
 ```
 
-> 👁️ `--action RedirectToLoginPage`는 미인증 요청을 자동으로 로그인 페이지로 리디렉션합니다. `--redirect-provider azureActiveDirectory`는 여러 공급자 중 기본 공급자를 Entra ID로 지정합니다. 설정이 App Service에 전파되기까지 수십 초가 소요될 수 있습니다.
+> 👁️ `az webapp auth config-version upgrade`는 새 Web App의 기본 인증 설정(v1)을 authV2 스키마로 업그레이드합니다. 이 명령 없이 `az webapp auth microsoft update`를 실행하면 `Cannot use auth v2 commands when the app is using auth v1` 오류가 발생합니다. `--action RedirectToLoginPage`는 미인증 요청을 자동으로 로그인 페이지로 리디렉션합니다. `--redirect-provider azureActiveDirectory`는 여러 공급자 중 기본 공급자를 Entra ID로 지정합니다. 설정이 App Service에 전파되기까지 수십 초가 소요될 수 있습니다.
 
 🟢 **실행** — 설정 전파 후 HTTP 상태 코드를 확인합니다(전파가 완료되지 않았으면 30초 대기 후 재시도).
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/
+curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 ```
 
 📋 **예상 출력**
 
 ```
+401
 302
 ```
 
-> 👁️ `302`는 미인증 요청이 Entra 로그인 페이지로 리디렉션되는 정상 응답입니다. 전파 직후에는 `200`이 반환될 수 있으므로, 30초–1분 대기 후 재시도하십시오.
+> 👁️ Easy Auth는 요청의 `User-Agent`를 보고 응답을 구분합니다 — 브라우저(예: `Mozilla/5.0`)에는 `302`(Entra 로그인 페이지로 리디렉션)를, curl 같은 API 클라이언트에는 `401`을 반환합니다. 전파 직후에는 둘 다 `200`이 반환될 수 있으므로, 30초–1분 대기 후 재시도하십시오.
 
 ---
 
@@ -132,7 +135,8 @@ $APP_URL/.auth/me
 | `az ad app update --enable-id-token-issuance` 완료 | 명령 오류 없음 |
 | `az webapp auth microsoft update` 완료 | 명령 오류 없이 JSON 출력 |
 | `az webapp auth update --enabled true` 완료 | `"enabled": true` 포함 JSON 출력 |
-| `curl -w "%{http_code}"` | `302` |
+| `curl -w "%{http_code}"` (기본 UA) | `401` |
+| `curl -w "%{http_code}"` (`User-Agent: Mozilla/5.0`) | `302` |
 | 브라우저 `$APP_URL` 접속 | Entra 로그인 화면으로 리디렉션 |
 | 로그인 후 `$APP_URL/.auth/me` | 사용자 클레임 JSON 반환 |
 
@@ -140,13 +144,13 @@ $APP_URL/.auth/me
 
 ## 트러블슈팅
 
-### (1) curl이 302가 아닌 200을 반환
+### (1) curl이 401/302가 아닌 200을 반환
 
 Easy Auth 설정이 아직 전파 중입니다. 30초–1분 대기 후 재시도하거나, 현재 활성 상태를 확인합니다.
 
 ```bash
 az webapp auth show -g $RG -n $APP \
-  --query "{enabled:enabled,action:globalValidation.unauthenticatedClientAction}" -o table
+  --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table
 ```
 
 `enabled`가 `true`이고 `action`이 `RedirectToLoginPage`인지 확인합니다. 값이 올바르면 추가 대기 후 curl을 재시도합니다.

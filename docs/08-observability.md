@@ -99,11 +99,13 @@ az monitor log-analytics query -w $LAW_CID --analytics-query \
 📋 **예상 출력** (예시 — 실제 값은 다를 수 있음)
 
 ```
-CsUriStem      ScStatus    hits
--------------  ----------  ----
-/api/info      200         30
-/              200          5
+CsUriStem      ScStatus    TableName      Hits
+-------------  ----------  -------------  ------
+/api/info      200         PrimaryResult  30
+/              200         PrimaryResult  5
 ```
+
+> 👁️ `TableName(PrimaryResult)` 열은 CLI가 자동으로 붙이는 결과 테이블 이름으로, 무시해도 됩니다.
 
 > 👁️ `CsUriStem`은 요청 경로, `ScStatus`는 HTTP 상태 코드입니다. `az monitor log-analytics query` 명령은 `log-analytics` 확장이 필요합니다. 확장이 없으면 아래 트러블슈팅 §(3)을 참조하십시오.
 

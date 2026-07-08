@@ -48,7 +48,7 @@ curl -s $APP_URL/api/info | jq -r .started_at
 📋 **예상 출력**
 
 ```
-2024-05-15T08:32:10.123456
+2026-07-08T01:35:30+00:00
 ```
 
 > 👁️ 이 값을 별도로 메모해 둡니다. 설정 변경 후 `started_at`이 달라지면 앱이 재시작되었음을 의미합니다.
@@ -95,7 +95,7 @@ az webapp config appsettings list -g $RG -n $APP -o table
 ```json
 {
   "message": "안녕하세요, App Service 워크숍!",
-  "started_at": "2024-05-15T08:33:45.678901"
+  "started_at": "2026-07-08T01:36:07+00:00"
 }
 ```
 
