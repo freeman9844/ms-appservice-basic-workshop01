@@ -33,11 +33,28 @@ def _clamp(raw, cap):
         return 0
 
 
+def _slot():
+    # Linux App Service는 컨테이너에 WEBSITE_SLOT_NAME을 주입하지 않음(실측).
+    # WEBSITE_HOSTNAME(슬롯별 호스트명)에서 슬롯 이름을 파싱해 보완한다.
+    #   production: app-x.azurewebsites.net → site명과 동일
+    #   staging:    app-x-staging.azurewebsites.net → site명 뒤에 -<slot>
+    slot = os.environ.get("WEBSITE_SLOT_NAME")
+    if slot:
+        return slot
+    host = os.environ.get("WEBSITE_HOSTNAME", "")
+    site = os.environ.get("WEBSITE_SITE_NAME", "")
+    prefix = f"{site}-"
+    hostname = host.split(".")[0]
+    if site and hostname.startswith(prefix):
+        return hostname[len(prefix):]
+    return "production"
+
+
 def _info():
     return {
         "version": VERSION,
         "color": COLORS.get(VERSION, "#6b7280"),
-        "slot": os.environ.get("WEBSITE_SLOT_NAME", "production"),
+        "slot": _slot(),
         "instance": os.environ.get("WEBSITE_INSTANCE_ID", socket.gethostname())[:8],
         "message": os.environ.get("WELCOME_MESSAGE", "App Service 워크숍에 오신 것을 환영합니다"),
         "started_at": STARTED_AT,

@@ -30,9 +30,20 @@ def test_api_info_fields():
     r = client().get("/api/info")
     data = r.get_json()
     assert data["version"] == "v1"
-    assert data["slot"] == "production"  # 로컬: WEBSITE_SLOT_NAME 미설정 기본값
+    assert data["slot"] == "production"  # 로컬: WEBSITE_* 미설정 기본값
     for key in ("color", "instance", "message", "started_at", "python"):
         assert key in data
+
+
+def test_slot_parsed_from_hostname(monkeypatch):
+    # Linux App Service: WEBSITE_SLOT_NAME 미주입 → WEBSITE_HOSTNAME에서 파싱
+    monkeypatch.setenv("WEBSITE_SITE_NAME", "app-x")
+    monkeypatch.setenv("WEBSITE_HOSTNAME", "app-x-staging.azurewebsites.net")
+    assert app_module._slot() == "staging"
+    monkeypatch.setenv("WEBSITE_HOSTNAME", "app-x.azurewebsites.net")
+    assert app_module._slot() == "production"
+    monkeypatch.setenv("WEBSITE_SLOT_NAME", "staging")
+    assert app_module._slot() == "staging"  # 주입되면 그대로 사용
 
 
 def test_clamp_caps_value():
