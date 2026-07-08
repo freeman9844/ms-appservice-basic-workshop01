@@ -1,4 +1,4 @@
-flask
-gunicorn
-azure-monitor-opentelemetry
-redis
+flask>=3,<4
+gunicorn>=22,<24
+azure-monitor-opentelemetry>=1.6,<2
+redis>=5,<6

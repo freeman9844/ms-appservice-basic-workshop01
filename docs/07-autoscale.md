@@ -156,6 +156,8 @@ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
 
 > 👁️ 축소는 확장보다 느립니다. 플랫폼이 트래픽 감소를 일정 시간 관찰한 후 인스턴스를 회수하므로, `wait` 이후 3–5분이 소요될 수 있습니다.
 
+> 👁️ 앱에는 CPU를 실제로 소모하는 `/load?sec=N` 엔드포인트도 있습니다(`hey -z 60s -c 20 $APP_URL/load?sec=1` 등). HTTP 부하 외에 CPU 기반 부하를 실험하고 싶을 때 활용하십시오.
+
 ---
 
 ## 검증

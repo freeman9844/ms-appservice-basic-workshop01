@@ -31,7 +31,7 @@
 > 세션 종료 시 설치한 확장·클론한 리포·작성한 스크립트가 **모두 삭제**됩니다.
 > 반드시 `Mount storage account` → 구독 선택 → **Apply** 순서로 진행하십시오.
 
-🖼️ **스크린샷** — Cloud Shell 영구 스토리지 마운트 선택 화면 *(T16에서 캡처 예정)*
+🖼️ **스크린샷** — Cloud Shell 영구 스토리지 마운트 선택 화면
 
 ---
 
@@ -52,7 +52,7 @@ az version
 
 ## 3단계 — CLI 확장 설치
 
-이 워크숍은 `application-insights` 및 `authV2` 확장을 사용합니다.
+이 워크숍은 `application-insights`, `authV2`, `log-analytics` 확장을 사용합니다.
 `--upgrade` 플래그로 멱등 설치하므로 이미 설치된 경우 최신 버전으로 업그레이드됩니다.
 
 🟢 **실행**
@@ -60,6 +60,7 @@ az version
 ```bash
 az extension add --name application-insights --upgrade --only-show-errors
 az extension add --name authV2 --upgrade --only-show-errors
+az extension add --name log-analytics --upgrade --only-show-errors
 ```
 
 ---

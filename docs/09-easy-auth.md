@@ -36,6 +36,12 @@ APP=app-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
 ```
 
+> 👁️ **1단계 완료 후 세션이 끊긴 경우 — `CLIENT_SECRET` 재발급**: `CLIENT_SECRET`은 생성 시점 이후 재조회가 불가능합니다. 세션이 끊겼다면 아래 명령으로 앱을 다시 찾고 시크릿을 재발급하여 진행하십시오.
+> ```bash
+> CLIENT_ID=$(az ad app list --display-name "auth-appsvcworkshop-$SUFFIX" --query "[0].appId" -o tsv)
+> CLIENT_SECRET=$(az ad app credential reset --id $CLIENT_ID --query password -o tsv)
+> ```
+
 ---
 
 ## 👁️ Easy Auth 구조 이해

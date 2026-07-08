@@ -87,6 +87,12 @@ for i in $(seq 1 30); do curl -s $APP_URL/api/info > /dev/null; done
 
 ## 3단계 — KQL로 HTTP 로그 조회
 
+🟢 **실행** — `az monitor log-analytics query` 명령은 `log-analytics` 확장이 필요합니다. 대화형 설치 프롬프트를 방지하기 위해 사전 설치합니다.
+
+```bash
+az extension add --name log-analytics --upgrade --only-show-errors
+```
+
 🟢 **실행** — LAW 워크스페이스 ID를 조회하고 KQL 쿼리를 실행합니다.
 
 ```bash

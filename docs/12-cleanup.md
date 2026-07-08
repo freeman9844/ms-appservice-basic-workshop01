@@ -107,12 +107,12 @@ DisplayName    Id    AppId
 
 워크숍 중 Cloud Shell 홈 디렉터리에 생성된 파일은 무해합니다. 필요하면 아래 명령으로 제거할 수 있습니다.
 
-> 👁️ `$HOME/.local/bin/hey`와 워크숍 중 생성된 zip 파일은 남겨도 과금이 발생하지 않습니다. 원하는 경우에만 삭제하십시오.
+> 👁️ `$HOME/go/bin/hey`와 워크숍 중 생성된 zip 파일은 남겨도 과금이 발생하지 않습니다. 원하는 경우에만 삭제하십시오.
 
 🟢 **실행 (선택)**
 
 ```bash
-rm -f $HOME/.local/bin/hey
+rm -f $HOME/go/bin/hey
 ```
 
 ---

@@ -86,7 +86,7 @@ az appservice plan update -g "$RG" -n "$PLAN" --elastic-scale true \
   --max-elastic-worker-count 5 -o none
 az webapp update -g "$RG" -n "$APP" --prewarmed-instance-count 1 \
   --minimum-elastic-instance-count 1 -o none
-mkdir -p "$HOME/.local/bin"; export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
   go install github.com/rakyll/hey@latest
   export PATH="$HOME/go/bin:$PATH"; }
