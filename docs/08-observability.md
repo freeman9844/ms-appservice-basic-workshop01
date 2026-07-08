@@ -17,7 +17,7 @@
 
 ## 소요 시간
 
-약 20–30분
+약 10–15분
 
 ---
 
@@ -51,7 +51,7 @@ Azure에서 웹앱 가시성을 확보하는 경로는 두 가지입니다.
 | 활성화 방법 | 진단 설정 구성 | 앱 설정 `APPLICATIONINSIGHTS_CONNECTION_STRING` 주입 |
 | Linux Python 제약 | 없음 | **codeless 자동 계측 미지원 → SDK 내장 필수** |
 
-> 👁️ 이 워크숍의 Flask 앱에는 `azure-monitor-opentelemetry` SDK가 이미 내장되어 있습니다. 커넥션 스트링을 환경 변수로 전달하면 텔레메트리가 즉시 활성화됩니다. 외부 의존성이 없으므로 **Application map은 단일 노드가 정상**입니다.
+> 👁️ 이 워크숍의 Flask 앱에는 `azure-monitor-opentelemetry` SDK가 이미 내장되어 있습니다. 커넥션 스트링을 환경 변수로 전달하면 계측이 즉시 켜집니다(데이터가 조회 가능해지기까지는 수 분 소요). 외부 의존성이 없으므로 **Application map은 단일 노드가 정상**입니다.
 
 ---
 
