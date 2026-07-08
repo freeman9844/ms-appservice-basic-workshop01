@@ -66,7 +66,7 @@ for i in $(seq 1 100); do curl -s $APP_URL/api/info | jq -r .version; done | sor
 ```
 ActionHostName                    ReroutePercentage    Name
 --------------------------------  -------------------  -------
-app-appsvcworkshop-XXXX-staging   20.0                 staging
+app-appsvcworkshop-<SUFFIX>-staging   20.0                 staging
 ```
 
 📋 **예상 출력** (분포 측정)
@@ -145,7 +145,7 @@ az webapp traffic-routing show -g $RG -n $APP -o table
 ```
 ActionHostName                    ReroutePercentage    Name
 --------------------------------  -------------------  -------
-app-appsvcworkshop-XXXX-staging   20.0                 staging
+app-appsvcworkshop-<SUFFIX>-staging   20.0                 staging
 ```
 
 ### 카나리 승격 후 버전 확인

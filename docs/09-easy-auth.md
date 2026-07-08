@@ -20,7 +20,7 @@
 flowchart LR
     U(("🌐 사용자")) -->|"HTTPS"| EA
     EA["🔒 Easy Auth<br/>(플랫폼 인증 레이어)<br/>미인증 → 302 → Entra 로그인"] -->|"인증 통과"| APP["Flask 앱"]
-    EA -. "OAuth 2.0 / OIDC" .-> EID["Entra ID<br/>(앱 등록: auth-appsvcworkshop-SUFFIX)"]
+    EA -.->|"OAuth 2.0 / OIDC"| EID["Entra ID<br/>(앱 등록: auth-appsvcworkshop-SUFFIX)"]
 ```
 
 > ⚠️ **이후 선택 모듈(10·11)은 curl 검증을 위해 첫머리에서 Easy Auth를 일시 비활성화합니다.** 해당 모듈 안내에 따라 auth를 껐다 켜십시오.
