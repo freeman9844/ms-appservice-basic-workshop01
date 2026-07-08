@@ -1,6 +1,6 @@
 # 09. Easy Auth(Entra ID 로그인 게이트)
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **스크린샷** = 화면 확인
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
 ---
 
@@ -14,26 +14,41 @@
 - **코드 수정 없이** 플랫폼이 앞단에서 인증을 처리하는 Easy Auth 구조를 이해합니다.
 - 모듈 종료 상태: **Entra 로그인 게이트 활성**.
 
+완성 후의 구조는 다음과 같습니다.
+
+```mermaid
+flowchart LR
+    U(("🌐 사용자")) -->|"HTTPS"| EA
+    EA["🔒 Easy Auth<br/>(플랫폼 인증 레이어)<br/>미인증 → 302 → Entra 로그인"] -->|"인증 통과"| APP["Flask 앱"]
+    EA -. "OAuth 2.0 / OIDC" .-> EID["Entra ID<br/>(앱 등록: auth-appsvcworkshop-SUFFIX)"]
+```
+
 > ⚠️ **이후 선택 모듈(10·11)은 curl 검증을 위해 첫머리에서 Easy Auth를 일시 비활성화합니다.** 해당 모듈 안내에 따라 auth를 껐다 켜십시오.
-
-## 소요 시간
-
-약 10–15분
 
 ---
 
-## 각 모듈 첫머리 변수 재설정 블록
+## 0단계 — (선택) 변수 재설정
 
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+> ⏭️ **08 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+echo "APP_URL=$APP_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
 
 > 👁️ **1단계 완료 후 세션이 끊긴 경우 — `CLIENT_SECRET` 재발급**: `CLIENT_SECRET`은 생성 시점 이후 재조회가 불가능합니다. 세션이 끊겼다면 아래 명령으로 앱을 다시 찾고 시크릿을 재발급하여 진행하십시오.
@@ -119,9 +134,9 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 
 🟢 **브라우저에서 `$APP_URL`에 접속**합니다(변수 값으로 치환하여 입력).
 
-🖼️ **Entra 로그인 화면** — 브라우저가 `login.microsoftonline.com` 로그인 페이지로 리디렉션됩니다. 워크숍 계정으로 로그인하고 권한 동의 화면에서 **수락**을 클릭합니다.
+🖼️ **예상 화면** — 브라우저가 `login.microsoftonline.com` 로그인 페이지로 리디렉션됩니다. 워크숍 계정으로 로그인하고 권한 동의 화면에서 **수락**을 클릭합니다.
 
-🖼️ **앱 v2 메인 페이지** — 로그인 후 `$APP_URL`의 Flask 앱 페이지가 정상 표시됩니다.
+🖼️ **예상 화면** — 로그인 후 `$APP_URL`의 Flask 앱 페이지가 정상 표시됩니다.
 
 🟢 **브라우저에서 아래 URL에 접속**하여 클레임 JSON을 확인합니다.
 
@@ -129,22 +144,48 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 $APP_URL/.auth/me
 ```
 
-🖼️ **`/.auth/me` 클레임 JSON** — `user_id`, `id_token`, `user_claims` 배열(이름·이메일·테넌트 ID 등)이 포함된 JSON이 브라우저에 반환됩니다.
+🖼️ **예상 화면** — `user_id`, `id_token`, `user_claims` 배열(이름·이메일·테넌트 ID 등)이 포함된 JSON이 브라우저에 반환됩니다.
 
 ---
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|---|---|
-| `az ad app create` 완료 | `CLIENT_ID` 값 출력(`echo "CLIENT_ID=$CLIENT_ID"` 확인) |
-| `az ad app update --enable-id-token-issuance` 완료 | 명령 오류 없음 |
-| `az webapp auth microsoft update` 완료 | 명령 오류 없이 JSON 출력 |
-| `az webapp auth update --enabled true` 완료 | `"enabled": true` 포함 JSON 출력 |
-| `curl -w "%{http_code}"` (기본 UA) | `401` |
-| `curl -w "%{http_code}"` (`User-Agent: Mozilla/5.0`) | `302` |
-| 브라우저 `$APP_URL` 접속 | Entra 로그인 화면으로 리디렉션 |
-| 로그인 후 `$APP_URL/.auth/me` | 사용자 클레임 JSON 반환 |
+### HTTP 상태 코드 확인
+
+🟢 **실행**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/
+curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
+```
+
+📋 **예상 출력**
+
+```
+401
+302
+```
+
+### Easy Auth 활성 상태 확인
+
+🟢 **실행**
+
+```bash
+az webapp auth show -g $RG -n $APP \
+  --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table
+```
+
+📋 **예상 출력**
+
+```
+Enabled    Action
+---------  --------------------
+True       RedirectToLoginPage
+```
+
+curl로 `401`/`302`가 확인되면 Easy Auth가 정상 활성화된 것입니다.
+
+🖼️ **예상 화면** — 브라우저에서 `$APP_URL`에 접속하면 Entra 로그인 화면으로 리디렉션되고, 로그인 후 `$APP_URL/.auth/me`에서 사용자 클레임 JSON을 확인할 수 있습니다.
 
 ---
 
@@ -192,4 +233,4 @@ az extension add --name authV2 --upgrade --only-show-errors
 
 ---
 
-이전 모듈: [08. 관찰 가능성](08-observability.md) | 다음 모듈: [10. Sidecar(선택)](10-sidecar-option.md)
+이전 모듈: [08. 관찰 가능성](08-observability.md) · 다음 모듈: [10. Sidecar(선택)](10-sidecar-option.md)

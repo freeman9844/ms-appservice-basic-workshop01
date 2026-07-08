@@ -1,6 +1,6 @@
 # 03. 코드 배포
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **스크린샷** = 화면 확인
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
 ---
 
@@ -13,18 +13,28 @@
 - `/health`·`/api/info` 엔드포인트로 배포 성공 여부를 검증합니다.
 - 로그 스트림을 통해 실시간 요청·에러 로그를 확인합니다.
 
-## 소요 시간
+완성 후의 구조는 다음과 같습니다.
 
-약 8–12분
+```mermaid
+flowchart LR
+    U(("🌐 사용자")) -->|"HTTPS"| A
+    CS["☁️ Cloud Shell<br/>(az webapp deploy)"] -->|"zip 배포<br/>Oryx 빌드"| A
+    subgraph PLAN["App Service Plan (plan-appsvcworkshop-SUFFIX)"]
+        A["**app-appsvcworkshop-SUFFIX**<br/>production 슬롯<br/>Flask v1 · gunicorn"]
+    end
+```
 
 ---
 
-## 각 모듈 첫머리 변수 재설정 블록
+## 0단계 — (선택) 변수 재설정
 
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+> ⏭️ **02 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -33,6 +43,13 @@ APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+echo "APP_URL=$APP_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
 
 ---
@@ -94,7 +111,7 @@ curl -s $APP_URL/api/info | jq
 }
 ```
 
-🖼️ **스크린샷** — 브라우저에서 `$APP_URL`을 열면 파란색 v1 페이지가 표시됩니다.
+🖼️ **예상 화면** — 브라우저에서 `$APP_URL`을 열면 파란색 v1 페이지가 표시됩니다.
 
 ---
 
@@ -112,15 +129,23 @@ az webapp log tail -g $RG -n $APP
 
 ## 검증
 
-`/api/info` 응답에서 다음 세 필드를 확인합니다.
+🟢 **실행**
 
-| 필드 | 예상 값 | 역할 |
-|------|---------|------|
-| `version` | `v1` | 배포된 코드 버전 |
-| `slot` | `production` | 현재 슬롯(이후 모듈에서 staging과 비교) |
-| `instance` | 임의 문자열 | 인스턴스 식별자(이후 스케일아웃 관찰에 활용) |
+```bash
+curl -s $APP_URL/api/info | jq
+```
 
-> 👁️ 이 세 필드는 이후 **슬롯 스왑**, **스케일아웃**, **트래픽 분산** 모듈에서 핵심 관찰 도구로 활용됩니다.
+📋 **예상 출력**
+
+```json
+{
+  "version": "v1",
+  "slot": "production",
+  "instance": "..."
+}
+```
+
+`version`이 `v1`, `slot`이 `production`으로 확인되면 배포가 완료된 것입니다. `instance` 값은 이후 **슬롯 스왑**, **스케일아웃**, **트래픽 분산** 모듈에서 핵심 관찰 도구로 활용됩니다.
 
 ---
 
@@ -148,4 +173,4 @@ zip 크기가 다소 커질 뿐이며, Oryx 빌드는 `tests/`를 무시합니�
 
 ---
 
-이전 모듈: [02. 환경 준비](02-environment-setup.md) | 다음 모듈: [04. 앱 설정](04-app-settings.md)
+이전 모듈: [02. 환경 준비](02-environment-setup.md) · 다음 모듈: [04. 앱 설정](04-app-settings.md)

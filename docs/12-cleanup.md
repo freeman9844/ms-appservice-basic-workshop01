@@ -1,6 +1,6 @@
 # 12. 정리
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **스크린샷** = 화면 확인
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
 ---
 
@@ -16,20 +16,22 @@
 
 ---
 
-## 소요 시간
+## 0단계 — 변수 재설정
 
-약 5–8분
+> 정리 모듈은 세션이 끊긴 후 수행하는 경우가 많습니다. `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
 
----
-
-## 각 모듈 첫머리 변수 재설정 블록
-
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 RG=rg-appsvcworkshop-$SUFFIX
+echo "RG=$RG"
+```
+
+📋 **예상 출력**
+
+```
+RG=rg-appsvcworkshop-<SUFFIX>
 ```
 
 ---
@@ -96,7 +98,7 @@ DisplayName    Id    AppId
 
 ## 🖼️ 포털에서 RG 부재 확인
 
-🖼️ **포털 확인** — Azure Portal에서 리소스 그룹이 삭제되었는지 확인합니다.
+🖼️ **예상 화면** — Azure Portal에서 리소스 그룹이 삭제되었는지 확인합니다.
 
 1. [portal.azure.com](https://portal.azure.com)에 접속합니다.
 2. **"리소스 그룹"** 메뉴로 이동하여 `rg-appsvcworkshop-<SUFFIX>` 이름의 그룹이 목록에 없는지 확인합니다.
@@ -119,12 +121,29 @@ rm -f $HOME/go/bin/hey
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|---|---|
-| `az group delete -n $RG --yes --no-wait` | 명령 오류 없이 즉시 반환 |
-| `az group exists -n $RG` | `false` |
-| 포털 리소스 그룹 목록 | `rg-appsvcworkshop-<SUFFIX>` 없음 |
-| `az ad app list --display-name "auth-appsvcworkshop-$SUFFIX" -o table` | 빈 목록(모듈 09 수행자) |
+🟢 **실행** (수 분 후)
+
+```bash
+az group exists -n $RG
+az ad app list --display-name "auth-appsvcworkshop-$SUFFIX" -o table
+```
+
+📋 **예상 출력 — RG 삭제 완료 시**
+
+```
+false
+```
+
+📋 **예상 출력 — Entra 앱 등록 삭제 완료 시**
+
+```
+DisplayName    Id    AppId
+-----------    --    -----
+```
+
+`az group exists`가 `false`를 반환하면 리소스 그룹 정리가 완료된 것입니다.
+
+🖼️ **예상 화면** — Azure Portal → **"리소스 그룹"** 메뉴에서 `rg-appsvcworkshop-<SUFFIX>` 이름의 그룹이 목록에 없으면 삭제 완료입니다.
 
 ---
 
@@ -162,6 +181,4 @@ az group list --query "[?starts_with(name,'rg-appsvcworkshop')]"
 
 ---
 
-| 이전 | 처음으로 |
-|---|---|
-| [11. (선택) Auto-heal & 진단](11-autoheal-option.md) | [처음으로](../README.md) |
+이전 모듈: [11. (선택) Auto-heal & 진단](11-autoheal-option.md) · [처음으로](../README.md)

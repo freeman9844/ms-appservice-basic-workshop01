@@ -1,6 +1,6 @@
 # 07. 자동 스케일(Automatic Scaling · 부하 확장/축소)
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
 
 ---
 
@@ -15,18 +15,17 @@
 - **Automatic scaling** 방식과 **규칙 기반(Azure Monitor autoscale)** 방식의 개념 차이를 이해합니다.
 - 모듈 종료 상태: **Automatic scaling 활성(min 1·max 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
 
-## 소요 시간
-
-약 12–18분
-
 ---
 
-## 각 모듈 첫머리 변수 재설정 블록
+## 0단계 — (선택) 변수 재설정
 
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+> ⏭️ **06 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -35,6 +34,13 @@ APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+echo "APP_URL=$APP_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
 
 ---
@@ -162,13 +168,40 @@ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|---|---|
-| `elastic-scale` 설정 후 플랜 상태 | 명령 오류 없이 완료 |
-| `hey` 설치 후 `hey 2>&1 \| head -1` | `Usage: hey [options...] <url>` 출력 |
-| 부하 중 `list-instances` 행 수 | 2행 이상 |
-| 인스턴스별 응답 분포(50회 curl) | 2종 이상의 인스턴스 ID 혼합 |
-| 부하 제거 후 `list-instances` 행 수 | 1행(단일 인스턴스) |
+### 확장(scale-out) 확인
+
+🟢 **실행**
+
+```bash
+az webapp list-instances -g $RG -n $APP -o table
+```
+
+📋 **예상 출력** (부하 중 — 2행 이상)
+
+```
+Name                                    State    StatusCode
+--------------------------------------  -------  ------------
+xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
+yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy    Ready    200
+```
+
+### 축소(scale-in) 확인
+
+🟢 **실행** (부하 제거 후 수 분 대기)
+
+```bash
+az webapp list-instances -g $RG -n $APP -o table
+```
+
+📋 **예상 출력** (축소 완료 후)
+
+```
+Name                                    State    StatusCode
+--------------------------------------  -------  ------------
+xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
+```
+
+부하 중 인스턴스가 2개 이상으로 확장되었다가, 부하 제거 후 1개로 축소되면 07 모듈이 완료된 것입니다.
 
 ---
 
@@ -206,4 +239,4 @@ command -v hey
 
 ---
 
-이전 모듈: [06. 트래픽 분할 · 카나리 배포 · 승격](06-traffic-split-canary.md) | 다음 모듈: [08. 관찰 가능성](08-observability.md)
+이전 모듈: [06. 트래픽 분할 · 카나리 배포 · 승격](06-traffic-split-canary.md) · 다음 모듈: [08. 관찰 가능성](08-observability.md)

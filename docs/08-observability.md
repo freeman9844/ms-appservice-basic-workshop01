@@ -1,6 +1,6 @@
 # 08. 관찰 가능성(진단 설정 → KQL · App Insights 연결)
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **스크린샷** = 화면 확인
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
 ---
 
@@ -15,18 +15,17 @@
 - 진단 설정(플랫폼 로그)과 App Insights(앱 텔레메트리)의 역할 차이를 이해합니다.
 - 모듈 종료 상태: **진단 설정 활성, APPLICATIONINSIGHTS_CONNECTION_STRING 주입 완료**.
 
-## 소요 시간
-
-약 10–15분
-
 ---
 
-## 각 모듈 첫머리 변수 재설정 블록
+## 0단계 — (선택) 변수 재설정
 
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+> ⏭️ **07 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -35,6 +34,13 @@ APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+echo "APP_URL=$APP_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
 
 ---
@@ -115,7 +121,7 @@ CsUriStem      ScStatus    TableName      Hits
 
 > 👁️ `CsUriStem`은 요청 경로, `ScStatus`는 HTTP 상태 코드입니다. `az monitor log-analytics query` 명령은 `log-analytics` 확장이 필요합니다. 확장이 없으면 아래 트러블슈팅 §(3)을 참조하십시오.
 
-🖼️ **포털에서 동일 쿼리 실행** — Azure Portal → Log Analytics 워크스페이스(`log-appsvcworkshop-$SUFFIX`) → **Logs** 블레이드에 아래 쿼리를 붙여 넣고 **Run**을 클릭합니다. 결과가 0건이면 **Time range**를 60분 또는 24시간으로 늘려 재시도하십시오.
+🖼️ **예상 화면** — Azure Portal → Log Analytics 워크스페이스(`log-appsvcworkshop-$SUFFIX`) → **Logs** 블레이드에 아래 쿼리를 붙여 넣고 **Run**을 클릭합니다. 결과가 0건이면 **Time range**를 60분 또는 24시간으로 늘려 재시도하십시오.
 
 ```
 AppServiceHTTPLogs
@@ -160,19 +166,50 @@ name                count_
 GET /api/info       20
 ```
 
-🖼️ **Live Metrics** — Azure Portal → Application Insights(`appi-appsvcworkshop-$SUFFIX`) → **Live Metrics** 블레이드에서 실시간 요청률·응답 시간·실패율을 확인합니다. 트래픽을 전송하는 동안 차트가 실시간으로 갱신됩니다.
+🖼️ **예상 화면** — Azure Portal → Application Insights(`appi-appsvcworkshop-$SUFFIX`) → **Live Metrics** 블레이드에서 실시간 요청률·응답 시간·실패율을 확인합니다. 트래픽을 전송하는 동안 차트가 실시간으로 갱신됩니다.
 
 ---
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|---|---|
-| `az monitor diagnostic-settings create` 완료 | 명령 오류 없이 JSON 출력 |
-| 트래픽 생성 후 5–10분 대기 KQL 조회 | `AppServiceHTTPLogs` 테이블에 1건 이상의 행 |
-| `az monitor app-insights component show` | `connectionString` 값 정상 출력 |
-| `az webapp config appsettings set` 완료 | `APPLICATIONINSIGHTS_CONNECTION_STRING` 포함 설정 목록 반환 |
-| `requests` KQL 조회(트래픽 발생 후 수 분 대기) | `name` 열에 `/api/info` 항목 1건 이상 |
+### HTTP 로그 KQL 확인
+
+🟢 **실행** (5–10분 대기 후)
+
+```bash
+LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
+az monitor log-analytics query -w $LAW_CID --analytics-query \
+  'AppServiceHTTPLogs | where TimeGenerated > ago(30m)
+   | summarize hits=count() by CsUriStem, ScStatus | order by hits desc' -o table
+```
+
+📋 **예상 출력**
+
+```
+CsUriStem      ScStatus    TableName      Hits
+-------------  ----------  -------------  ------
+/api/info      200         PrimaryResult  30
+/              200         PrimaryResult  5
+```
+
+### App Insights 텔레메트리 확인
+
+🟢 **실행** (트래픽 발생 후 수 분 대기)
+
+```bash
+az monitor app-insights query -g $RG --apps $APPI --analytics-query \
+  'requests | where timestamp > ago(15m) | summarize count() by name' -o table
+```
+
+📋 **예상 출력**
+
+```
+name                count_
+------------------  -------
+GET /api/info       20
+```
+
+`AppServiceHTTPLogs`에 데이터가 조회되고 `requests` 테이블에 `/api/info` 항목이 확인되면 08 모듈이 완료된 것입니다.
 
 ---
 
@@ -215,4 +252,4 @@ az extension add --name application-insights --upgrade --only-show-errors
 
 ---
 
-이전 모듈: [07. 자동 스케일](07-autoscale.md) | 다음 모듈: [09. Easy Auth](09-easy-auth.md)
+이전 모듈: [07. 자동 스케일](07-autoscale.md) · 다음 모듈: [09. Easy Auth](09-easy-auth.md)

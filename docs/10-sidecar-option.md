@@ -1,6 +1,6 @@
 # 10. (선택) Redis 사이드카 컨테이너
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
 
 > ⚠️ **(선택) 모듈 — 건너뛰어도 12 정리에 지장 없음.** 이 모듈을 건너뛰려면 [12. 정리](12-cleanup.md)로 직접 이동하십시오.
 
@@ -15,26 +15,40 @@
 - 사이드카 개념(localhost 공유, 활용 예)과 Azure Container Apps(ACA) 대응 패턴을 이해합니다.
 - 모듈 종료 상태: **Redis 사이드카 부착·`/cache` 동작 중, Easy Auth 비활성**
 
+완성 후의 구조는 다음과 같습니다.
+
+```mermaid
+flowchart LR
+    U(("🌐 사용자")) -->|"HTTPS"| APP
+    subgraph INST["App Service 인스턴스"]
+        APP["Flask 앱<br/>/cache"] -->|"localhost:6379"| RC["Redis 사이드카<br/>:6379"]
+    end
+```
+
 ---
 
-## 소요 시간
+## 0단계 — (선택) 변수 재설정
 
-약 8–12분
+> ⏭️ **09 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
 
----
-
-## 각 모듈 첫머리 변수 재설정 블록
-
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+echo "APP_URL=$APP_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
 
 ---
@@ -54,7 +68,7 @@ APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)
 
 ---
 
-## 0단계 — Easy Auth 일시 비활성화
+## 1단계 — Easy Auth 일시 비활성화
 
 모듈 09에서 Easy Auth가 활성화된 상태입니다. curl로 `/cache` 엔드포인트를 테스트하려면 인증 게이트를 일시적으로 해제해야 합니다.
 
@@ -67,7 +81,7 @@ az webapp auth update -g $RG -n $APP --enabled false
 
 ---
 
-## 1단계 — 사이드카 부착 전 `/cache` 동작 확인
+## 2단계 — 사이드카 부착 전 `/cache` 동작 확인
 
 🟢 **실행** — Redis가 없는 상태에서 `/cache` 응답을 확인합니다.
 
@@ -90,7 +104,7 @@ curl -s $APP_URL/cache | jq
 
 ---
 
-## 2단계 — Redis 사이드카 부착
+## 3단계 — Redis 사이드카 부착
 
 🟢 **실행** — `az webapp sitecontainers create` 명령으로 MCR 미러 Redis 이미지를 사이드카로 부착하고 앱을 재시작합니다.
 
@@ -120,7 +134,7 @@ redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
 
 ---
 
-## 3단계 — 사이드카 동작 검증
+## 4단계 — 사이드카 동작 검증
 
 🟢 **실행** — 60초 대기 후 `/cache`를 두 번 호출하여 `visits` 값이 단조 증가하는지 확인합니다.
 
@@ -154,7 +168,7 @@ curl -s $APP_URL/cache | jq   # visits 증가 확인
 
 ---
 
-## 4단계 — Easy Auth 재활성화 안내
+## 5단계 — Easy Auth 재활성화 안내
 
 > 👁️ Easy Auth를 다시 활성화하려면 아래 명령을 실행하십시오. **다음 모듈 11(선택)로 진행하는 경우 11 첫머리에서 다시 비활성화하므로 지금 재활성화를 생략해도 됩니다.**
 
@@ -166,14 +180,52 @@ az webapp auth update -g $RG -n $APP --enabled true
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|---|---|
-| 부착 전 `curl $APP_URL/cache` | `"cache": "unavailable"` 반환 |
-| `az webapp sitecontainers create` 완료 | 명령 오류 없이 JSON 출력 |
-| `az webapp sitecontainers list` | `redis` 컨테이너 `IsMain=False`로 목록에 표시 |
-| `az webapp restart` 후 60초 대기 | 앱 정상 응답 |
-| 첫 번째 `curl $APP_URL/cache` | `"cache": "ok", "visits": 1` |
-| 두 번째 `curl $APP_URL/cache` | `"cache": "ok", "visits": 2` (visits 단조 증가) |
+### 사이드카 목록 확인
+
+🟢 **실행**
+
+```bash
+az webapp sitecontainers list -g $RG -n $APP -o table
+```
+
+📋 **예상 출력**
+
+```
+Name    Image                                                      IsMain
+------  ---------------------------------------------------------  --------
+redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
+```
+
+### /cache 동작 확인
+
+🟢 **실행**
+
+```bash
+curl -s $APP_URL/cache | jq
+curl -s $APP_URL/cache | jq
+```
+
+📋 **예상 출력 — 첫 번째 호출**
+
+```json
+{
+  "cache": "ok",
+  "redis_host": "localhost",
+  "visits": 1
+}
+```
+
+📋 **예상 출력 — 두 번째 호출**
+
+```json
+{
+  "cache": "ok",
+  "redis_host": "localhost",
+  "visits": 2
+}
+```
+
+`visits`가 호출마다 단조 증가하면 Redis 사이드카가 정상 동작하는 것입니다.
 
 ---
 
@@ -216,4 +268,4 @@ az rest --method put \
 
 ---
 
-이전 모듈: [09. Easy Auth](09-easy-auth.md) | 다음 모듈: [11. Auto Heal(선택)](11-autoheal-option.md) 또는 [12. 정리](12-cleanup.md)
+이전 모듈: [09. Easy Auth](09-easy-auth.md) · 다음 모듈: [11. Auto Heal(선택)](11-autoheal-option.md) 또는 [12. 정리](12-cleanup.md)

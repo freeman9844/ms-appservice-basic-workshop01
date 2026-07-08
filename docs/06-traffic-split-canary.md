@@ -1,6 +1,6 @@
 # 06. 트래픽 분할 · 카나리 배포 · 승격
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
 
 ---
 
@@ -13,18 +13,17 @@
 - 카나리 검증 완료 후 전체 트래픽을 v2로 전환(승격)합니다.
 - 모듈 종료 상태: **production = v2, staging = v1, 라우팅 0%** (07 모듈 이후 이 상태가 유지됩니다).
 
-## 소요 시간
-
-약 8–12분
-
 ---
 
-## 각 모듈 첫머리 변수 재설정 블록
+## 0단계 — (선택) 변수 재설정
 
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+> ⏭️ **05 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -35,6 +34,15 @@ APPI=appi-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
 STG_URL="https://$(az webapp deployment slot list -g $RG -n $APP \
   --query "[?name=='staging'].defaultHostName | [0]" -o tsv)"
+echo "APP_URL=$APP_URL"
+echo "STG_URL=$STG_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
+STG_URL=https://app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net
 ```
 
 ---
@@ -124,14 +132,37 @@ v2
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|-----------|-----------|
-| `traffic-routing show` 의 `ReroutePercentage` | `20.0` |
-| 100회 curl 분포 | 약 80 v1 / 약 20 v2 (±10 오차 허용) |
-| `x-ms-routing-name=staging` 강제 라우팅 | `v2` |
-| `x-ms-routing-name=self` 강제 라우팅 | `v1` |
-| `traffic-routing clear` 후 스왑 완료 | 명령 오류 없이 종료 |
-| 스왑 후 `curl $APP_URL/api/info \| jq -r .version` | `v2` |
+### 트래픽 분할 확인
+
+🟢 **실행**
+
+```bash
+az webapp traffic-routing show -g $RG -n $APP -o table
+```
+
+📋 **예상 출력**
+
+```
+ActionHostName                    ReroutePercentage    Name
+--------------------------------  -------------------  -------
+app-appsvcworkshop-XXXX-staging   20.0                 staging
+```
+
+### 카나리 승격 후 버전 확인
+
+🟢 **실행**
+
+```bash
+curl -s $APP_URL/api/info | jq -r .version
+```
+
+📋 **예상 출력**
+
+```
+v2
+```
+
+트래픽 분할 20% 설정과 스왑 후 production이 v2로 전환되면 06 모듈이 완료된 것입니다.
 
 ---
 
@@ -151,4 +182,4 @@ v2
 
 ---
 
-이전 모듈: [05. 배포 슬롯·무중단 스왑·롤백](05-deployment-slots-swap.md) | 다음 모듈: [07. 자동 스케일](07-autoscale.md)
+이전 모듈: [05. 배포 슬롯·무중단 스왑·롤백](05-deployment-slots-swap.md) · 다음 모듈: [07. 자동 스케일](07-autoscale.md)

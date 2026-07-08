@@ -1,6 +1,6 @@
 # 05. 배포 슬롯 · 무중단 스왑 · 롤백
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **스크린샷** = 화면 확인
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
 ---
 
@@ -13,18 +13,29 @@
 - 문제 발견 가정 후 **재스왑 한 번**으로 v1(파랑 `#2563eb`)을 즉시 복원합니다.
 - 모듈 종료 상태: **production = v1, staging = v2** (06 모듈에서 이 v2를 카나리로 승격합니다).
 
-## 소요 시간
+완성 후의 구조는 다음과 같습니다.
 
-약 10–15분
+```mermaid
+flowchart LR
+    U(("🌐 사용자")) -->|"production URL"| P
+    subgraph APP["App Service 앱 (app-appsvcworkshop-SUFFIX)"]
+        P["🔵 **production 슬롯**<br/>v1"]
+        S["🟢 **staging 슬롯**<br/>v2"]
+        P <-->|"스왑 시 교체"| S
+    end
+```
 
 ---
 
-## 각 모듈 첫머리 변수 재설정 블록
+## 0단계 — (선택) 변수 재설정
 
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+> ⏭️ **04 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -33,6 +44,13 @@ APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+echo "APP_URL=$APP_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
 
 ---
@@ -80,7 +98,7 @@ curl -s $STG_URL/api/info | jq '{version, slot}'
 }
 ```
 
-🖼️ **스크린샷** — 브라우저에서 `$STG_URL`을 열면 **초록(`#16a34a`)** 배경의 v2 화면이, `$APP_URL`을 열면 **파랑(`#2563eb`)** 배경의 v1 화면이 표시됩니다.
+🖼️ **예상 화면** — 브라우저에서 `$STG_URL`을 열면 **초록(`#16a34a`)** 배경의 v2 화면이, `$APP_URL`을 열면 **파랑(`#2563eb`)** 배경의 v1 화면이 표시됩니다.
 
 ---
 
@@ -131,15 +149,54 @@ v1
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|-----------|-----------|
-| `curl $STG_URL/api/info` 의 `version` 필드 | `"v2"` |
-| `curl $STG_URL/api/info` 의 `slot` 필드 | `"staging"` |
-| 1차 스왑 후 `curl $APP_URL/api/info \| jq -r .version` | `v2` |
-| 1차 스왑 후 `curl $STG_URL/api/info \| jq -r .version` | `v1` |
-| 재스왑(롤백) 후 `curl $APP_URL/api/info \| jq -r .version` | `v1` |
-| 브라우저 `$APP_URL` (최종) | 파랑(`#2563eb`) v1 화면 |
-| 브라우저 `$STG_URL` (최종) | 초록(`#16a34a`) v2 화면 |
+### 스테이징 슬롯 확인
+
+🟢 **실행**
+
+```bash
+curl -s $STG_URL/api/info | jq '{version, slot}'
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "version": "v2",
+  "slot": "staging"
+}
+```
+
+### 스왑·롤백 최종 상태 확인
+
+🟢 **실행**
+
+```bash
+curl -s $APP_URL/api/info | jq -r .version    # v1 — 롤백 후 production
+curl -s $STG_URL/api/info | jq -r .version    # v2 — staging
+```
+
+📋 **예상 출력**
+
+```
+v1
+v2
+```
+
+최종 상태(production = v1, staging = v2)가 확인되면 05 모듈이 완료된 것입니다.
+
+🖼️ **예상 화면** — 브라우저에서 `$APP_URL`(파랑 v1)과 `$STG_URL`(초록 v2)을 각각 열어 색상을 확인합니다.
+
+---
+
+## 개념 정리
+
+| 개념 | 설명 |
+|---|---|
+| **배포 슬롯** | 같은 App Service Plan 안에서 독립적으로 운영되는 앱 인스턴스; production과 staging이 서로 다른 URL을 가짐 |
+| **슬롯 스왑** | 코드 재배포 없이 production ↔ staging 라우팅을 교환하는 무중단 전환; 롤백은 재스왑 한 번 |
+| **sticky 설정 (슬롯 고정 설정)** | `--slot-settings`로 지정한 앱 설정은 스왑 후에도 해당 슬롯에 남음(예: staging 전용 DB 연결 문자열) |
+| **워밍업** | 스왑 전 대상 슬롯이 HTTP 200 헬스 체크를 통과할 때까지 플랫폼이 대기 — 다운타임 없음 |
+| **즉시 롤백** | 스왑 후 이전 버전이 반대 슬롯에 보존되므로 재스왑 한 번으로 즉각 복원 가능 |
 
 ---
 
@@ -159,4 +216,4 @@ App Service는 스왑 전 새 슬롯이 **HTTP 200**을 반환할 때까지 워�
 
 ---
 
-이전 모듈: [04. 앱 설정·환경변수](04-app-settings.md) | 다음 모듈: [06. 트래픽 분할·카나리](06-traffic-split-canary.md)
+이전 모듈: [04. 앱 설정·환경변수](04-app-settings.md) · 다음 모듈: [06. 트래픽 분할·카나리](06-traffic-split-canary.md)

@@ -1,6 +1,6 @@
 # 04. 앱 설정 · 환경변수
 
-> 🟢 **실행 명령** = 직접 입력·수행 · 👁️ **확인·관찰** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **스크린샷** = 화면 확인
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
 ---
 
@@ -12,18 +12,17 @@
 - 앱 설정 변경 전후의 `started_at` 타임스탬프를 비교하여 재시작 여부를 검증합니다.
 - **슬롯 고정 설정**(`--slot-settings`) 개념을 미리 파악하여 05 배포 슬롯 스왑에 대비합니다.
 
-## 소요 시간
-
-약 5–8분
-
 ---
 
-## 각 모듈 첫머리 변수 재설정 블록
+## 0단계 — (선택) 변수 재설정
 
-> 👁️ **Cloud Shell 세션이 끊긴 경우** `SUFFIX` 값을 아래에 입력하여 변수를 재구성하십시오.
+> ⏭️ **03 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
+> `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+
+🟢 **실행**
 
 ```bash
-# ── 변수 재설정 블록 (SUFFIX를 직접 입력) ──
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -32,6 +31,13 @@ APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+echo "APP_URL=$APP_URL"
+```
+
+📋 **예상 출력**
+
+```
+APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
 
 ---
@@ -110,18 +116,40 @@ WELCOME_MESSAGE                 안녕하세요, App Service 워크숍!     Fals
 
 > 👁️ **핵심 관찰**: `started_at`이 1단계에서 기록한 값과 **달라졌다면** 앱 설정 변경으로 인한 재시작이 발생한 것입니다. 이 `started_at` 관찰 기법은 11 모듈(자동 복구·재시작 관찰)에서 다시 활용됩니다.
 
-🖼️ **스크린샷** — 브라우저에서 `$APP_URL`을 새로고침하면 홈 화면에 "안녕하세요, App Service 워크숍!" 메시지가 표시됩니다.
+🖼️ **예상 화면** — 브라우저에서 `$APP_URL`을 새로고침하면 홈 화면에 "안녕하세요, App Service 워크숍!" 메시지가 표시됩니다.
 
 ---
 
 ## 검증
 
-| 확인 항목 | 기대 결과 |
-|-----------|-----------|
-| `curl /api/info` 의 `message` 필드 | `"안녕하세요, App Service 워크숍!"` |
-| `curl /api/info` 의 `started_at` 필드 | 1단계 기록값과 **다름** (재시작 증거) |
-| `appsettings list` 의 `WELCOME_MESSAGE` | 목록에 표시됨 |
-| 브라우저 홈 화면 | 새 메시지 반영 |
+🟢 **실행**
+
+```bash
+curl -s $APP_URL/api/info | jq '{message, started_at}'
+az webapp config appsettings list -g $RG -n $APP -o table
+```
+
+📋 **예상 출력 — `curl`**
+
+```json
+{
+  "message": "안녕하세요, App Service 워크숍!",
+  "started_at": "2026-07-08T01:36:07+00:00"
+}
+```
+
+📋 **예상 출력 — `appsettings list`**
+
+```
+Name                            Value                               SlotSetting
+------------------------------  ----------------------------------  -----------
+SCM_DO_BUILD_DURING_DEPLOYMENT  true                                False
+WELCOME_MESSAGE                 안녕하세요, App Service 워크숍!     False
+```
+
+`message`가 설정한 값으로 표시되고, `started_at`이 1단계 기록값과 달라졌다면 앱 설정 변경으로 인한 재시작이 확인된 것입니다.
+
+🖼️ **예상 화면** — 브라우저에서 `$APP_URL`을 새로고침하면 홈 화면에 새 메시지가 표시됩니다.
 
 ---
 
@@ -151,4 +179,4 @@ Cloud Shell에는 `jq`가 기본 설치되어 있습니다. 로컬 터미널 사
 
 ---
 
-이전 모듈: [03. 코드 배포](03-deploy-code.md) | 다음 모듈: [05. 배포 슬롯 스왑](05-deployment-slots-swap.md)
+이전 모듈: [03. 코드 배포](03-deploy-code.md) · 다음 모듈: [05. 배포 슬롯 스왑](05-deployment-slots-swap.md)
