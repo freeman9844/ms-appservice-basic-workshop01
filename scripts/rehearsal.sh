@@ -95,10 +95,12 @@ az webapp deployment slot swap -g "$RG" -n "$APP" --slot staging --target-slot p
 [ "$(curl -s "$APP_URL/api/info" | jq -r .version)" = "v2" ] && echo "[06] 승격 OK (prod=v2)"
 
 echo "===== [07] Automatic scaling + hey 부하 ($(date +%T)) ====="
-az appservice plan update -g "$RG" -n "$PLAN" --elastic-scale true \
-  --max-elastic-worker-count 5 -o none
-az webapp update -g "$RG" -n "$APP" --prewarmed-instance-count 1 \
-  --minimum-elastic-instance-count 1 -o none
+PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
+APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
+az rest --method patch --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' -o none
+az rest --method patch --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' -o none
 export PATH="$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
   go install github.com/rakyll/hey@latest

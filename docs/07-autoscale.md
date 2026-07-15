@@ -111,16 +111,54 @@ flowchart LR
 
 > 👁️ **진입 상태** — production = v2(초록 `#16a34a`), staging = v1(파랑 `#2563eb`), 라우팅 0%. 이 상태는 06 모듈에서 만들어졌습니다.
 
-🟢 **실행** — App Service 플랜을 Elastic scale 모드로 전환하고 웹앱의 최솟값을 설정합니다.
+🟢 **실행** — App Service Plan과 Web App 리소스 ID를 조회한 뒤 ARM REST API로 Automatic scaling을 설정합니다.
 
 ```bash
-az appservice plan update -g $RG -n $PLAN --elastic-scale true --max-elastic-worker-count 5
-az webapp update -g $RG -n $APP --prewarmed-instance-count 1 --minimum-elastic-instance-count 1
+PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
+APP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
+
+az rest --method patch \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+  --output none
+
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none
 ```
 
-> 👁️ `--elastic-scale true`는 Plan을 Automatic scaling 모드로 전환합니다. `--max-elastic-worker-count 5`는 Maximum burst, `--minimum-elastic-instance-count 1`은 Always-ready 최소값, `--prewarmed-instance-count 1`은 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
+> 👁️ ARM 속성 `elasticScaleEnabled`는 Plan을 Automatic scaling 모드로 전환합니다. `maximumElasticWorkerCount`는 Maximum burst, `minimumElasticInstanceCount`는 Always-ready 최소값, `preWarmedInstanceCount`는 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
+> Plan PATCH의 `sku` 객체는 ARM API가 기존 P0v4 Plan을 갱신할 때 요구하는 현재 SKU 정보이며, Plan의 가격 계층을 변경하지 않습니다.
 >
 > Automatic scaling을 활성화하면 기존 앱의 **ARR Affinity(세션 선호도)**가 자동으로 비활성화됩니다. 특정 인스턴스에 요청을 고정하지 않아야 여러 인스턴스로 트래픽을 고르게 분산할 수 있기 때문입니다.
+>
+> **P0v4에서 ARM REST API를 사용하는 이유:** 공식 App Service 기능은 Premium v4를 지원하지만, Azure CLI 2.87.0의 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령에는 Premium v2/v3만 허용하는 이전 SKU 검증 로직이 남아 있습니다. `az rest`는 같은 공식 ARM 속성을 직접 설정하여 이 CLI 제한을 우회합니다.
+
+🟢 **실행** — 설정값을 조회합니다.
+
+```bash
+az rest --method get \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
+
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "automaticScaling": true,
+  "maximumBurst": 5
+}
+{
+  "alwaysReady": 1,
+  "prewarmed": 1
+}
+```
 
 ---
 
@@ -285,6 +323,15 @@ go install github.com/rakyll/hey@latest
 export PATH=$HOME/go/bin:$PATH
 command -v hey
 ```
+
+### (4) Premium V2/V3 SKU만 지원한다는 오류
+
+```text
+--number-of-workers and --elastic-scale can only be used on premium V2/V3 or workflow SKUs.
+['--minimum-elastic-instance-count', '--prewarmed-instance-count'] are only supported for elastic premium V2/V3 SKUs
+```
+
+P0v4가 지원되지 않는 것이 아니라 Azure CLI의 SKU 검증 로직이 Premium v4를 아직 포함하지 않아 발생하는 오류입니다. 1단계의 `az rest` 명령을 사용하고, 기존 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령은 실행하지 않습니다.
 
 ---
 
