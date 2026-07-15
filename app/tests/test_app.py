@@ -1,6 +1,8 @@
 import sys
 import os
 
+import redis
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import app as app_module
@@ -66,7 +68,10 @@ def test_load_returns_burned_seconds():
 
 
 def test_cache_degrades_without_redis(monkeypatch):
-    monkeypatch.setenv("REDIS_HOST", "redis.invalid")
+    def fail_incr(*args, **kwargs):
+        raise redis.exceptions.ConnectionError
+
+    monkeypatch.setattr(redis.Redis, "incr", fail_incr)
     r = client().get("/cache")
     assert r.status_code == 200
     assert r.get_json()["cache"] == "unavailable"

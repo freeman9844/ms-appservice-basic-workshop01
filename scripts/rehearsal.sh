@@ -12,7 +12,16 @@ APPI="appi-appsvcworkshop-$SUFFIX"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_DIR=$(mktemp -d)
 CLIENT_ID=""
-trap 'rm -rf "$TMP_DIR"' EXIT
+HEY_PID=""
+
+cleanup() {
+  if [ -n "$HEY_PID" ]; then
+    kill "$HEY_PID" 2>/dev/null || true
+    wait "$HEY_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
 echo "===== [00] SUFFIX=$SUFFIX RG=$RG ($(date +%T)) ====="
 
@@ -101,6 +110,7 @@ az webapp list-instances -g "$RG" -n "$APP" -o table
 INSTANCES=$(az webapp list-instances -g "$RG" -n "$APP" --query "length(@)" -o tsv)
 echo "[07] 부하 중 인스턴스 수: $INSTANCES (기대 ≥2)"
 wait "$HEY_PID" || true
+HEY_PID=""
 echo "[07] 부하 제거 — scale-in은 수 분 후 az webapp list-instances로 확인(KEEP=1 권장)"
 
 echo "===== [08] 진단 설정 + KQL + App Insights ($(date +%T)) ====="
