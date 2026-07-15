@@ -73,6 +73,10 @@ az webapp config appsettings set -g $RG -n $APP \
 
 ## 2단계 — zip 아카이브 생성 및 배포
 
+배포할 애플리케이션은 Python **Flask 기반의 v1 웹앱**입니다. 홈 화면과 함께 상태 확인용 `/health`, 앱 버전·슬롯·인스턴스 정보를 반환하는 `/api/info` 엔드포인트를 제공하며, 이후 모듈에서 앱 설정·슬롯 스왑·트래픽 분할·자동 스케일 동작을 관찰하는 데 사용합니다.
+
+`app.py`와 의존성 목록인 `requirements.txt`를 zip 파일로 묶어 App Service에 배포합니다.
+
 🟢 **실행**
 
 ```bash
