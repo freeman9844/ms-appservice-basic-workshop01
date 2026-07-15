@@ -10,12 +10,12 @@
 
 - Azure Cloud Shell에서 **영구 스토리지를 마운트**합니다.
 - 실습에 사용할 Azure 구독을 확인합니다.
-- 실습에 필요한 CLI 확장(`application-insights`, `authV2`)을 설치합니다.
+- 실습에 필요한 CLI 확장(`application-insights`, `authV2`, `log-analytics`)을 설치합니다.
 - 워크숍 리포지토리를 `git clone`으로 가져옵니다.
 
 ---
 
-## 1단계 — Cloud Shell 영구 스토리지 마운트
+## 1단계 — Cloud Shell 접속 및 구독 선택
 
 브라우저에서 [https://shell.azure.com](https://shell.azure.com) 을 열어 **Bash** 를 선택합니다.
 
@@ -29,11 +29,7 @@
 
 🖼️ **예상 화면** — Cloud Shell 영구 스토리지 마운트 선택 화면
 
----
-
-## 2단계 — 구독 확인
-
-Cloud Shell은 Azure Portal에 로그인된 계정으로 자동 인증됩니다. 아래 명령으로 현재 구독과 CLI 버전을 확인합니다.
+Cloud Shell은 Azure Portal에 로그인된 계정으로 자동 인증되므로 별도 `az login`은 필요하지 않습니다. 아래 명령으로 현재 구독과 CLI 버전을 확인합니다.
 
 🟢 **실행**
 
@@ -44,9 +40,26 @@ az version
 
 👁️ **확인** — 출력된 `Name` 및 `SubscriptionId` 값이 실습에 사용할 구독인지 확인합니다.
 
+구독이 여러 개이거나 다른 구독으로 전환해야 한다면 아래 명령을 실행합니다.
+
+🟢 **실행** (구독 전환이 필요한 경우에만)
+
+```bash
+az account set --subscription "<구독 ID 또는 이름>"
+az account show -o table
+```
+
+📋 **예상 출력**
+
+```text
+Name                  CloudName    SubscriptionId                        State    IsDefault
+--------------------  -----------  ------------------------------------  -------  -----------
+<구독 이름>            AzureCloud   xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  Enabled  True
+```
+
 ---
 
-## 3단계 — CLI 확장 설치
+## 2단계 — CLI 확장 설치
 
 이 워크숍은 `application-insights`, `authV2`, `log-analytics` 확장을 사용합니다.
 `--upgrade` 플래그로 멱등 설치하므로 이미 설치된 경우 최신 버전으로 업그레이드됩니다.
@@ -61,7 +74,7 @@ az extension add --name log-analytics --upgrade --only-show-errors
 
 ---
 
-## 4단계 — 워크숍 리포지토리 클론
+## 3단계 — 워크숍 리포지토리 클론
 
 샘플 애플리케이션 소스 코드와 실습 스크립트를 내려받습니다.
 
