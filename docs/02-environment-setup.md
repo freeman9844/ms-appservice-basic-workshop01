@@ -15,41 +15,23 @@
 
 ---
 
-## 변수 재설정 규약 — 각 모듈의 0단계
-
-> 👁️ **중요 — SUFFIX 메모 필수**
->
-> 아래 1단계에서 `SUFFIX`를 출력한 뒤 **반드시 메모**해 두십시오.
-> 이후 모든 모듈의 첫머리에는 **0단계 — (선택) 변수 재설정** 단계가 제공됩니다.
-> Cloud Shell 세션이 끊기더라도 `SUFFIX` 값만 알고 있으면 전체 변수를 재구성할 수 있습니다.
-
-```bash
-# ── 이후 모듈 첫머리 변수 재설정 블록 예시 (SUFFIX를 직접 입력) ──
-SUFFIX=<이전에_메모한_값>
-LOC=koreacentral
-RG=rg-appsvcworkshop-$SUFFIX
-PLAN=plan-appsvcworkshop-$SUFFIX
-APP=app-appsvcworkshop-$SUFFIX
-LAW=log-appsvcworkshop-$SUFFIX
-APPI=appi-appsvcworkshop-$SUFFIX
-APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
-```
-
----
-
 ## 1단계 — 환경 변수 정의 및 리소스 생성
+
+`SUFFIX`는 여러 참가자의 리소스 이름이 겹치지 않도록 구분하는 값입니다. 원하는 **5자리 숫자**를 직접 입력하고 이후 모듈에서 다시 사용할 수 있도록 메모해 두세요.
+
+예를 들어 `04271`을 사용하려면 `SUFFIX="04271"`로 입력합니다. 앱 이름이 이미 사용 중이라는 오류가 발생하면 다른 숫자로 변경하여 다시 실행하세요.
 
 🟢 **실행**
 
 ```bash
-SUFFIX=$RANDOM$RANDOM; SUFFIX=${SUFFIX:0:5}
+SUFFIX="04271"   # 예시: 원하는 5자리 숫자로 변경
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
-echo "SUFFIX=$SUFFIX"   # ⚠️ 이후 모듈에서 재사용 — 메모해 두세요
+echo "SUFFIX=$SUFFIX"   # ⚠️ 이후 모듈에서 재사용
 
 az group create -n $RG -l $LOC
 az appservice plan create -g $RG -n $PLAN --is-linux --sku P0V3
@@ -141,10 +123,10 @@ Running
 ### (1) 앱 이름 전역 중복 오류
 
 Web App 이름(`$APP`)은 `azurewebsites.net` 도메인에서 **전 세계적으로 고유** 해야 합니다.
-`The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생하면 `SUFFIX`를 새로 생성하여 변수 전체를 재정의하고 명령을 재실행합니다.
+`The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생하면 다른 5자리 숫자를 입력하여 변수 전체를 재정의하고 명령을 재실행합니다.
 
 ```bash
-SUFFIX=$RANDOM$RANDOM; SUFFIX=${SUFFIX:0:5}
+SUFFIX="58316"   # 예시: 기존 값과 다른 5자리 숫자
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
