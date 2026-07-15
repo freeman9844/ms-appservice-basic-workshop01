@@ -1,6 +1,6 @@
 # 06. 트래픽 분할 · 카나리 배포 · 승격
 
-> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
 
 ---
 
@@ -85,6 +85,13 @@ ActionHostName                                          Name     ReroutePercenta
 ------------------------------------------------------  -------  -------------------
 app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 ```
+
+> 👁️ CLI로 변경한 트래픽 분기 설정은 **Azure Portal 관리 콘솔**에서도 확인할 수 있습니다.
+> Web App 리소스에서 **Deployment > Deployment slots**로 이동한 뒤 **Refresh**를 선택하면 **Traffic %** 열에 production `80`, staging `20`이 표시됩니다.
+
+🖼️ **예상 화면 — Azure Portal 배포 슬롯별 트래픽 비율**
+
+![Azure Portal Deployment slots 화면에서 production 80%, staging 20% 트래픽 비율 확인](images/06-traffic-routing-portal.png)
 
 📋 **예상 출력** (분포 측정)
 
