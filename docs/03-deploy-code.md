@@ -160,6 +160,8 @@ curl -s $APP_URL/api/info | jq
 
 🖼️ **예상 화면** — 브라우저에서 `$APP_URL`을 열면 파란색 v1 페이지가 표시됩니다.
 
+![브라우저에 표시된 파란색 App Service 워크숍 v1 production 페이지](images/03-app-v1-production.png)
+
 ---
 
 ## 4단계 — 로그 스트림
