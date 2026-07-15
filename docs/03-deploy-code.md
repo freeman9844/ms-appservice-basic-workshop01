@@ -160,13 +160,44 @@ curl -s $APP_URL/api/info | jq
 
 ## 4단계 — 로그 스트림
 
+App Service의 로그를 파일 시스템에 기록하도록 활성화한 뒤, Cloud Shell에서 실시간으로 스트리밍합니다.
+
+| 로그 종류 | 설정 | 확인 내용 |
+|---|---|---|
+| **애플리케이션 로그** | `--application-logging filesystem` | Python·Flask·gunicorn이 표준 출력과 표준 오류에 기록한 시작·오류 메시지 |
+| **웹 서버 로그** | `--web-server-logging filesystem` | HTTP 요청 경로, 응답 상태 코드 등 웹 요청 처리 정보 |
+
 🟢 **실행**
 
 ```bash
+# 애플리케이션 로그와 웹 서버 로그를 App Service 파일 시스템에 기록
 az webapp log config -g $RG -n $APP --application-logging filesystem --web-server-logging filesystem
+
+# 활성화된 로그를 현재 터미널에 실시간 출력
 az webapp log tail -g $RG -n $APP
-# 다른 탭에서 curl $APP_URL/ 후 로그 확인, Ctrl+C로 종료
 ```
+
+`az webapp log tail`은 새 로그를 기다리며 계속 실행되는 명령입니다. 이 Cloud Shell 탭은 그대로 두고 **새 Cloud Shell 탭**을 연 다음 요청을 전송합니다.
+
+🟢 **실행** (새 Cloud Shell 탭)
+
+```bash
+curl -s $APP_URL/health
+curl -s $APP_URL/api/info | jq
+```
+
+📋 **예상 출력** (로그 시각·인스턴스·메시지 형식은 달라질 수 있습니다)
+
+```text
+Connecting to log stream...
+...
+GET /health ... 200
+GET /api/info ... 200
+```
+
+> 👁️ 요청 직후 로그가 보이지 않으면 약 30초 기다린 뒤 `curl`을 다시 실행하세요. 로그 버퍼링으로 애플리케이션 로그와 HTTP 로그의 출력 순서가 실제 요청 순서와 다를 수 있습니다.
+
+로그 확인을 마치면 로그 스트림을 실행한 탭에서 **Ctrl+C**를 눌러 종료합니다. Azure Portal에서는 **App Service → Monitoring → Log stream**에서도 동일한 로그를 확인할 수 있습니다.
 
 ---
 
