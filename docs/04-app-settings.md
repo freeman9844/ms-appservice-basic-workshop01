@@ -73,6 +73,13 @@ az webapp config appsettings set -g $RG -n $APP \
   --settings WELCOME_MESSAGE="안녕하세요, App Service 워크숍!"
 ```
 
+> 👁️ CLI로 추가한 앱 설정은 **Azure Portal 관리 콘솔**에서도 확인할 수 있습니다.
+> Web App 리소스에서 **Settings > Environment variables > App settings**로 이동한 뒤 **Refresh**를 선택하면 `WELCOME_MESSAGE`와 설정값이 표시됩니다.
+
+🖼️ **예상 화면 — Azure Portal 앱 설정**
+
+![Azure Portal Environment variables 화면에서 WELCOME_MESSAGE 앱 설정 확인](images/04-app-settings-portal.png)
+
 > 👁️ **개념 — 앱 설정과 환경변수**
 >
 > App Service의 **앱 설정**은 컨테이너 내부에서 **환경변수**로 주입됩니다.
