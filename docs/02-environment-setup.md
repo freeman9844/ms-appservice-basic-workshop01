@@ -9,7 +9,7 @@
 이 모듈에서는 워크숍 전반에 걸쳐 사용할 Azure 리소스를 생성합니다.
 
 - 환경 변수(`SUFFIX`, `RG`, `PLAN`, `APP`, `LAW`, `APPI`)를 정의합니다.
-- **리소스 그룹**, **App Service Plan(P0V3)**, **Web App(Python 3.12)** 을 프로비저닝합니다.
+- **리소스 그룹**, **App Service Plan(P0v3)**, **Web App(Python 3.12)** 을 프로비저닝합니다.
 - **Log Analytics Workspace** 와 **Application Insights 컴포넌트** 를 연결합니다.
 - 기본 호스트네임(`APP_URL`)을 조회하여 앱 엔드포인트를 확인합니다.
 
@@ -70,10 +70,10 @@ echo $APP_URL
 > **App Service Plan** 은 VM 인스턴스(CPU·메모리·OS)를 정의하는 **컴퓨트 레이어** 입니다.
 > **Web App** 은 그 Plan 위에서 실행되는 **논리적 앱 단위** 이며, 하나의 Plan에 여러 Web App을 올릴 수 있습니다.
 >
-> 이번 워크숍에서 **P0V3** SKU를 선택한 이유:
+> 이번 워크숍에서 **P0v3** SKU를 선택한 이유:
 > - **배포 슬롯**(스테이징/프로덕션 스왑)은 Standard 계층 이상에서만 지원됩니다.
 > - **Automatic scaling**(자동 스케일링) 및 **사이드카 컨테이너** 기능은 Premium V3 이상에서 활성화됩니다.
-> - P0V3는 Premium V3의 최소 사이즈로 위 기능을 가장 경제적으로 체험할 수 있습니다.
+> - P0v3는 Premium V3의 최소 사이즈로 위 기능을 가장 경제적으로 체험할 수 있습니다.
 >
 > **기본 도메인**(`defaultHostName`)은 Web App 생성 시 Azure가 전역 고유 이름으로 자동 할당합니다.
 > 직접 입력하지 않고 반드시 `az webapp show … --query defaultHostName` 조회로 가져오십시오.
@@ -153,15 +153,15 @@ APPI=appi-appsvcworkshop-$SUFFIX
 echo "SUFFIX=$SUFFIX"
 ```
 
-### (2) P0V3 SKU 미지원 리전
+### (2) P0v3 SKU 미지원 리전
 
-특정 리전에서 P0V3 SKU를 지원하지 않는 경우 아래 오류가 발생합니다.
+특정 리전에서 P0v3 SKU를 지원하지 않는 경우 아래 오류가 발생합니다.
 
 ```text
 The pricing tier 'P0V3' is not allowed in this resource group.
 ```
 
-이 경우 `--sku P1V3`으로 대체합니다(비용이 다소 높아집니다). 리허설 시 koreacentral 가용성을 실측하여 본 문서를 갱신합니다.
+이 오류가 발생하면 `--sku P1V3`으로 대체합니다(비용이 다소 높아집니다). 이 워크숍은 `koreacentral`의 P0v3 가용성을 기준으로 검증되었지만, 구독별 할당량과 일시적 용량 상황에 따라 결과가 달라질 수 있습니다.
 
 ```bash
 az appservice plan create -g $RG -n $PLAN --is-linux --sku P1V3

@@ -10,12 +10,16 @@ APP="app-appsvcworkshop-$SUFFIX"
 LAW="log-appsvcworkshop-$SUFFIX"
 APPI="appi-appsvcworkshop-$SUFFIX"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TMP_DIR=$(mktemp -d)
+CLIENT_ID=""
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "===== [00] SUFFIX=$SUFFIX RG=$RG ($(date +%T)) ====="
 
 echo "===== [01] 확장 설치 ($(date +%T)) ====="
 az extension add --name application-insights --upgrade --only-show-errors
 az extension add --name authV2 --upgrade --only-show-errors
+az extension add --name log-analytics --upgrade --only-show-errors
 
 echo "===== [02] RG + Plan(P0v3) + Web App + LAW + App Insights ($(date +%T)) ====="
 az group create -n "$RG" -l "$LOC" -o none
@@ -32,8 +36,8 @@ echo "APP_URL=$APP_URL"
 echo "===== [03] zip deploy (v1) ($(date +%T)) ====="
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true -o none
-( cd "$REPO_DIR/app" && zip -qr /tmp/app-v1.zip . -x "tests/*" -x "__pycache__/*" -x "*.pyc" )
-az webapp deploy -g "$RG" -n "$APP" --src-path /tmp/app-v1.zip --type zip --track-status
+( cd "$REPO_DIR/app" && zip -qr "$TMP_DIR/app-v1.zip" . -x "tests/*" -x "__pycache__/*" -x "*.pyc" )
+az webapp deploy -g "$RG" -n "$APP" --src-path "$TMP_DIR/app-v1.zip" --type zip --track-status
 for i in $(seq 1 30); do
   code=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/health" || true)
   [ "$code" = "200" ] && break; sleep 10
@@ -52,10 +56,10 @@ AFTER=$(curl -s "$APP_URL/api/info" | jq -r .started_at)
 echo "===== [05] staging 슬롯 + v2 배포 + swap/롤백 ($(date +%T)) ====="
 az webapp deployment slot create -g "$RG" -n "$APP" --slot staging \
   --configuration-source "$APP" -o none
-sed -i 's#^VERSION = "v1"#VERSION = "v2"#' "$REPO_DIR/app/app.py"
-( cd "$REPO_DIR/app" && zip -qr /tmp/app-v2.zip . -x "tests/*" -x "__pycache__/*" -x "*.pyc" )
-git -C "$REPO_DIR" checkout -- app/app.py   # 로컬 소스 v1 원복
-az webapp deploy -g "$RG" -n "$APP" --slot staging --src-path /tmp/app-v2.zip \
+cp -a "$REPO_DIR/app" "$TMP_DIR/app-v2"
+sed -i 's#^VERSION = "v1"#VERSION = "v2"#' "$TMP_DIR/app-v2/app.py"
+( cd "$TMP_DIR/app-v2" && zip -qr "$TMP_DIR/app-v2.zip" . -x "tests/*" -x "__pycache__/*" -x "*.pyc" )
+az webapp deploy -g "$RG" -n "$APP" --slot staging --src-path "$TMP_DIR/app-v2.zip" \
   --type zip --track-status
 STG_URL="https://$(az webapp deployment slot list -g "$RG" -n "$APP" \
   --query "[?name=='staging'].defaultHostName | [0]" -o tsv)"
@@ -90,7 +94,7 @@ export PATH="$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
   go install github.com/rakyll/hey@latest
   export PATH="$HOME/go/bin:$PATH"; }
-hey -z 120s -c 100 -q 10 "$APP_URL/api/info" > /tmp/hey.out &
+hey -z 120s -c 100 -q 10 "$APP_URL/api/info" > "$TMP_DIR/hey.out" &
 HEY_PID=$!
 sleep 90
 az webapp list-instances -g "$RG" -n "$APP" -o table
@@ -117,26 +121,26 @@ az monitor log-analytics query -w "$LAW_CID" --analytics-query \
   'AppServiceHTTPLogs | where TimeGenerated > ago(30m) | summarize hits=count() by CsUriStem | order by hits desc' \
   -o table || echo "[08] 적재 지연 — KEEP=1이면 포털에서 재확인"
 
-echo "===== [09] Easy Auth (미인증 리디렉션 확인까지) ($(date +%T)) ====="
-TENANT_ID=$(az account show --query tenantId -o tsv)
-CLIENT_ID=$(az ad app create --display-name "auth-appsvcworkshop-$SUFFIX" \
-  --web-redirect-uris "$APP_URL/.auth/login/aad/callback" \
-  --sign-in-audience AzureADMyOrg --query appId -o tsv)
-az ad app update --id "$CLIENT_ID" --enable-id-token-issuance true
-CLIENT_SECRET=$(az ad app credential reset --id "$CLIENT_ID" --display-name easyauth \
-  --query password -o tsv)
-az webapp auth config-version upgrade -g "$RG" -n "$APP" -o none
-az webapp auth microsoft update -g "$RG" -n "$APP" \
-  --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET" \
-  --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes -o none
-az webapp auth update -g "$RG" -n "$APP" --enabled true \
-  --action RedirectToLoginPage --redirect-provider azureActiveDirectory -o none
-sleep 40
-code_api=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/")
-code_html=$(curl -s -o /dev/null -w "%{http_code}" -H "User-Agent: Mozilla/5.0" "$APP_URL/")
-echo "[09] 미인증 응답: API=$code_api (기대 401) / 브라우저 UA=$code_html (기대 302)"
-
 if [ "${SKIP_OPTIONAL:-0}" != "1" ]; then
+  echo "===== [09] Easy Auth (미인증 리디렉션 확인까지) ($(date +%T)) ====="
+  TENANT_ID=$(az account show --query tenantId -o tsv)
+  CLIENT_ID=$(az ad app create --display-name "auth-appsvcworkshop-$SUFFIX" \
+    --web-redirect-uris "$APP_URL/.auth/login/aad/callback" \
+    --sign-in-audience AzureADMyOrg --query appId -o tsv)
+  az ad app update --id "$CLIENT_ID" --enable-id-token-issuance true
+  CLIENT_SECRET=$(az ad app credential reset --id "$CLIENT_ID" --display-name easyauth \
+    --query password -o tsv)
+  az webapp auth config-version upgrade -g "$RG" -n "$APP" -o none
+  az webapp auth microsoft update -g "$RG" -n "$APP" \
+    --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET" \
+    --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes -o none
+  az webapp auth update -g "$RG" -n "$APP" --enabled true \
+    --action RedirectToLoginPage --redirect-provider azureActiveDirectory -o none
+  sleep 40
+  code_api=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/")
+  code_html=$(curl -s -o /dev/null -w "%{http_code}" -H "User-Agent: Mozilla/5.0" "$APP_URL/")
+  echo "[09] 미인증 응답: API=$code_api (기대 401) / 브라우저 UA=$code_html (기대 302)"
+
   echo "===== [10] Redis 사이드카 ($(date +%T)) ====="
   az webapp auth update -g "$RG" -n "$APP" --enabled false -o none
   az webapp sitecontainers create -g "$RG" -n "$APP" --container-name redis \
@@ -163,10 +167,11 @@ fi
 
 echo "===== [12] 정리 ($(date +%T)) ====="
 if [ "${KEEP:-0}" = "1" ]; then
-  echo "KEEP=1 — 삭제 생략. 수동 정리: az group delete -n $RG --yes; az ad app delete --id $CLIENT_ID"
+  echo "KEEP=1 — RG 삭제 생략. 수동 정리: az group delete -n $RG --yes"
+  [ -n "$CLIENT_ID" ] && echo "Entra 앱 삭제: az ad app delete --id $CLIENT_ID"
 else
   az group delete -n "$RG" --yes --no-wait
-  az ad app delete --id "$CLIENT_ID"
+  [ -n "$CLIENT_ID" ] && az ad app delete --id "$CLIENT_ID"
   echo "[12] 삭제 요청 완료 (RG 삭제는 수 분 소요)"
 fi
 echo "===== 리허설 종료 ====="

@@ -113,6 +113,7 @@ Cloud Shell을 완전히 종료한 뒤 다시 접속하여 **1단계**부터 `Mo
 ```bash
 az extension add --name application-insights --upgrade --only-show-errors
 az extension add --name authV2 --upgrade --only-show-errors
+az extension add --name log-analytics --upgrade --only-show-errors
 ```
 
 설치가 계속 실패하면 CLI 자체를 업그레이드한 뒤 재시도합니다.

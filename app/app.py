@@ -108,7 +108,7 @@ def slow():
 
 @app.get("/cache")
 def cache():
-    import redis  # 지연 import — 사이드카 모듈(10)을 건너뛴 경우에도 앱은 정상 동작
+    import redis  # Redis 연결 실패는 아래에서 unavailable 응답으로 처리
 
     host = os.environ.get("REDIS_HOST", "localhost")
     try:

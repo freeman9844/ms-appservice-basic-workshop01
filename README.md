@@ -1,6 +1,6 @@
 # Azure App Service 기본 핸즈온 워크숍
 
-> Azure App Service의 핵심 라이프사이클을 **Cloud Shell + az CLI만으로** 체험하는 한국어 핸즈온 워크숍입니다(코어 약 1시간 18분–1시간 53분, 선택 모듈 포함 시 최대 약 2시간 30분). Python(Flask) 앱을 zip 배포(Oryx 빌드)로 올리고, 앱 설정 → 슬롯 스왑 → 카나리 → 자동 스케일 → 관찰 가능성까지 단계별로 실습합니다. 선택 모듈에서는 **인증(Easy Auth)**, **사이드카 컨테이너**, **Auto-heal & 진단**을 추가로 체험할 수 있습니다.
+> Azure App Service의 핵심 라이프사이클을 **Cloud Shell + az CLI만으로** 체험하는 한국어 핸즈온 워크숍입니다(코어 약 1시간 18분–1시간 53분, 선택 모듈 포함 시 최대 약 2시간 32분). Python(Flask) 앱을 zip 배포(Oryx 빌드)로 올리고, 앱 설정 → 슬롯 스왑 → 카나리 → 자동 스케일 → 관찰 가능성까지 단계별로 실습합니다. 선택 모듈에서는 **인증(Easy Auth)**, **사이드카 컨테이너**, **Auto-heal & 진단**을 추가로 체험할 수 있습니다.
 
 ---
 
@@ -58,7 +58,7 @@ flowchart LR
 | # | 모듈 | 한 줄 설명 |
 |---|------|------------|
 | 00 | (현재 문서) | 워크숍 전체 개요·목표·시간표 |
-| 01 | [사전 준비](docs/01-prerequisites.md) | Cloud Shell 영구 스토리지 마운트, az CLI 버전 확인, 리포지토리 클론 |
+| 01 | [사전 준비](docs/01-prerequisites.md) | Cloud Shell 영구 스토리지 마운트, az CLI 버전·확장 확인, 리포지토리 클론 |
 | 02 | [환경 준비](docs/02-environment-setup.md) | 리소스 그룹 → App Service Plan(P0v3) → Web App(Python) → LAW·App Insights 생성 |
 | 03 | [코드 배포 & 외부 접속](docs/03-deploy-code.md) | zip deploy(Oryx 빌드) → 브라우저/curl 접속 확인 → 로그 스트리밍 |
 | 04 | [앱 설정·환경변수](docs/04-app-settings.md) | 앱 설정 추가·변경으로 동작 전환, 설정 변경 = 재시작 체감 |

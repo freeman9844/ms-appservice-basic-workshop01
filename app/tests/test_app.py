@@ -65,7 +65,8 @@ def test_load_returns_burned_seconds():
     assert r.get_json()["burned_sec"] == 0
 
 
-def test_cache_degrades_without_redis():
+def test_cache_degrades_without_redis(monkeypatch):
+    monkeypatch.setenv("REDIS_HOST", "redis.invalid")
     r = client().get("/cache")
     assert r.status_code == 200
     assert r.get_json()["cache"] == "unavailable"
