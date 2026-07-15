@@ -142,11 +142,17 @@ curl -s $APP_URL/api/info | jq
 
 ```json
 {
-  "version": "v1",
+  "color": "#2563eb",
+  "instance": "<instance-id>",
+  "message": "App Service 워크숍에 오신 것을 환영합니다",
+  "python": "3.12.x",
   "slot": "production",
-  "instance": "..."
+  "started_at": "<UTC 시작 시각>",
+  "version": "v1"
 }
 ```
+
+> 👁️ `instance`는 현재 요청을 처리한 App Service 인스턴스 식별자이며, `started_at`은 앱 프로세스가 시작된 UTC 시각입니다. 두 값과 Python 패치 버전은 실행 환경에 따라 달라집니다.
 
 🖼️ **예상 화면** — 브라우저에서 `$APP_URL`을 열면 파란색 v1 페이지가 표시됩니다.
 
@@ -176,9 +182,13 @@ curl -s $APP_URL/api/info | jq
 
 ```json
 {
-  "version": "v1",
+  "color": "#2563eb",
+  "instance": "<instance-id>",
+  "message": "App Service 워크숍에 오신 것을 환영합니다",
+  "python": "3.12.x",
   "slot": "production",
-  "instance": "..."
+  "started_at": "<UTC 시작 시각>",
+  "version": "v1"
 }
 ```
 
