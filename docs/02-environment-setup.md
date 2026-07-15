@@ -142,6 +142,12 @@ echo $APP_URL
 https://app-appsvcworkshop-XXXXX.azurewebsites.net
 ```
 
+👁️ **브라우저 확인** — `$APP_URL` 값을 브라우저 주소창에 붙여넣습니다. 아직 애플리케이션 코드를 배포하지 않았으므로 Azure App Service의 Python 기본 시작 페이지가 표시됩니다.
+
+🖼️ **예상 화면** — App Service Python 기본 시작 페이지
+
+![브라우저에 표시된 Azure App Service Python 기본 시작 페이지](images/02-app-service-default-page.png)
+
 ---
 
 ## 검증
@@ -157,10 +163,6 @@ az webapp show -g $RG -n $APP --query state -o tsv
 ```text
 Running
 ```
-
-👁️ **브라우저 확인** — `$APP_URL` 값을 브라우저 주소창에 붙여넣어 Azure App Service 기본 자리표시 페이지가 열리는지 확인합니다. 아직 애플리케이션 코드를 배포하지 않은 상태이므로 기본 페이지가 표시됩니다.
-
-🖼️ **예상 화면** — App Service 기본 자리표시 페이지
 
 ---
 
