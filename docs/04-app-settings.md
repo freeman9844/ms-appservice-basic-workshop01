@@ -6,10 +6,10 @@
 
 ## 목표
 
-이 모듈에서는 Azure App Service의 앱 설정(Application Settings)을 통해 환경변수를 주입하고, 설정 변경이 애플리케이션 재시작을 유발함을 `started_at` 값으로 직접 확인합니다.
+이 모듈에서는 Azure App Service의 앱 설정(Application Settings)을 통해 환경변수를 주입하고, `message`와 `started_at` 값을 비교하여 동작 변경과 애플리케이션 재시작을 함께 확인합니다.
 
 - `WELCOME_MESSAGE` 앱 설정을 추가하여 코드 수정 없이 홈 화면 메시지를 변경합니다.
-- 앱 설정 변경 전후의 `started_at` 타임스탬프를 비교하여 재시작 여부를 검증합니다.
+- 앱 설정 변경 전후의 `message`와 `started_at`을 비교하여 메시지 반영과 재시작 여부를 검증합니다.
 - **슬롯 고정 설정**(`--slot-settings`) 개념을 미리 파악하여 05 배포 슬롯 스왑에 대비합니다.
 
 ---
@@ -42,22 +42,25 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 
 ---
 
-## 1단계 — 변경 전 프로세스 시작 시각 기록
+## 1단계 — 변경 전 메시지와 프로세스 시작 시각 확인
 
 🟢 **실행**
 
 ```bash
-# 변경 전 프로세스 시작 시각 기록
-curl -s $APP_URL/api/info | jq -r .started_at
+# 변경 전 기본 메시지와 프로세스 시작 시각 확인
+curl -s $APP_URL/api/info | jq '{message, started_at}'
 ```
 
 📋 **예상 출력**
 
-```
-2026-07-08T01:35:30+00:00
+```json
+{
+  "message": "App Service 워크숍에 오신 것을 환영합니다",
+  "started_at": "2026-07-08T01:35:30+00:00"
+}
 ```
 
-> 👁️ 이 값을 별도로 메모해 둡니다. 설정 변경 후 `started_at`이 달라지면 앱이 재시작되었음을 의미합니다.
+> 👁️ 두 값을 메모해 둡니다. 설정 변경 후 `message`가 새 값으로 바뀌면 환경변수가 반영된 것이고, `started_at`이 달라지면 앱 프로세스가 재시작된 것입니다.
 
 ---
 
@@ -114,7 +117,7 @@ SCM_DO_BUILD_DURING_DEPLOYMENT  true                                False
 WELCOME_MESSAGE                 안녕하세요, App Service 워크숍!     False
 ```
 
-> 👁️ **핵심 관찰**: `started_at`이 1단계에서 기록한 값과 **달라졌다면** 앱 설정 변경으로 인한 재시작이 발생한 것입니다. 이 `started_at` 관찰 기법은 11 모듈(자동 복구·재시작 관찰)에서 다시 활용됩니다.
+> 👁️ **핵심 관찰**: `message`는 기본 문구에서 설정한 문구로 변경되고, `started_at`은 1단계에서 기록한 값과 달라져야 합니다. 이는 앱 설정이 환경변수로 반영되고 그 과정에서 앱 프로세스가 재시작되었음을 의미합니다. 이 `started_at` 관찰 기법은 11 모듈(자동 복구·재시작 관찰)에서 다시 활용됩니다.
 
 🖼️ **예상 화면** — 브라우저에서 `$APP_URL`을 새로고침하면 홈 화면에 "안녕하세요, App Service 워크숍!" 메시지가 표시됩니다.
 
