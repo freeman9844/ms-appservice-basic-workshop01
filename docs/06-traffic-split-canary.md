@@ -86,13 +86,6 @@ ActionHostName                                          Name     ReroutePercenta
 app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 ```
 
-> 👁️ CLI로 변경한 트래픽 분기 설정은 **Azure Portal 관리 콘솔**에서도 확인할 수 있습니다.
-> Web App 리소스에서 **Deployment > Deployment slots**로 이동한 뒤 **Refresh**를 선택하면 **Traffic %** 열에 production `80`, staging `20`이 표시됩니다.
-
-🖼️ **예상 화면 — Azure Portal 배포 슬롯별 트래픽 비율**
-
-![Azure Portal Deployment slots 화면에서 production 80%, staging 20% 트래픽 비율 확인](images/06-traffic-routing-portal.png)
-
 📋 **예상 출력** (분포 측정)
 
 ```
@@ -120,6 +113,13 @@ app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 > 👁️ **쿠키 sticky 동작 — curl과 브라우저가 다른 이유**
 >
 > Azure 트래픽 라우팅은 첫 번째 응답에 `x-ms-routing-name` **쿠키**를 내려보냅니다. 브라우저는 이 쿠키를 저장하므로 한 번 배정된 슬롯에 계속 연결됩니다(sticky). 위 `curl` 명령은 쿠키를 저장하지 않으므로 매 요청마다 새로 분배됩니다. 브라우저에서 버전이 바뀌지 않는 것은 정상 동작입니다.
+
+> 👁️ CLI로 변경한 트래픽 분기 설정은 **Azure Portal 관리 콘솔**에서도 확인할 수 있습니다.
+> Web App 리소스에서 **Deployment > Deployment slots**로 이동한 뒤 **Refresh**를 선택하면 **Traffic %** 열에 production `80`, staging `20`이 표시됩니다.
+
+🖼️ **예상 화면 — Azure Portal 배포 슬롯별 트래픽 비율**
+
+![Azure Portal Deployment slots 화면에서 production 80%, staging 20% 트래픽 비율 확인](images/06-traffic-routing-portal.png)
 
 ---
 
