@@ -154,6 +154,10 @@ v2
 v1
 ```
 
+🖼️ **예상 화면** — 브라우저에서 production URL인 `$APP_URL`을 새로고침하면 초록색 v2 페이지가 표시됩니다.
+
+![슬롯 스왑 후 production URL에 표시된 초록색 v2 App Service 워크숍 페이지](images/05-swap-production-v2.png)
+
 ---
 
 ## 4단계 — 롤백: 재스왑으로 v1 즉시 복원
