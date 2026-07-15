@@ -13,7 +13,8 @@
 - `list-instances` 와 인스턴스별 응답 분포로 확장을 검증합니다.
 - 부하 종료 후 인스턴스가 1개로 축소됨을 확인합니다.
 - **Automatic scaling** 방식과 **규칙 기반(Azure Monitor autoscale)** 방식의 개념 차이를 이해합니다.
-- 모듈 종료 상태: **Automatic scaling 활성(min 1·max 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
+- **Always-ready instances**와 **Prewarmed instances**의 역할과 비용 차이를 이해합니다.
+- 모듈 종료 상태: **Automatic scaling 활성(Always ready 1·Prewarmed 1·Maximum burst 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
 
 ---
 
@@ -51,14 +52,58 @@ Azure App Service에서 수평 스케일(인스턴스 수 조정)을 구현하�
 
 | 비교 항목 | **Automatic scaling** | **규칙 기반(Azure Monitor autoscale)** |
 |---|---|---|
-| 플랜 요건 | **Premium v3(Pv3) 전용** | Standard 이상 |
+| 플랜 요건 | **Premium v2–v4** | Standard 이상 |
 | 스케일 트리거 | **HTTP 요청 부하** — 플랫폼이 자동 판단 | CPU·메모리·큐 길이 등 **메트릭 + 직접 규칙** |
 | 설정 복잡도 | 최솟값·최댓값만 지정 | 규칙(임계값·방향·증감량·쿨다운) 직접 작성 |
 | 관리 주체 | **플랫폼 완전 관리** | 운영자가 규칙 유지·보수 |
-| 콜드스타트 방지 | `prewarmed-instance-count`로 **웜 인스턴스 상시 대기** | 스케일아웃 후 새 인스턴스 워밍 시간 존재 |
+| 콜드스타트 방지 | Prewarmed 인스턴스를 버퍼로 준비 | 스케일아웃 후 새 인스턴스 워밍 시간 존재 |
 | ACA 대응 | ACA **HTTP 스케일링**(KEDA HTTP Add-on) | ACA **사용자 정의 KEDA 스케일러** |
 
-> 👁️ `prewarmed-instance-count`는 플랫폼이 미리 워밍해 두는 대기 인스턴스 수입니다. 확장 요청이 발생하면 이미 준비된 인스턴스가 즉시 투입되므로 콜드스타트 지연 없이 빠르게 처리 용량을 늘릴 수 있습니다.
+> 👁️ Automatic scaling은 **HTTP 트래픽**을 기준으로 동작하며 배포 슬롯으로 분기된 트래픽에는 적용되지 않습니다. 이 모듈에서는 production URL인 `$APP_URL`에 직접 부하를 보냅니다.
+
+---
+
+## 👁️ Always-ready와 Prewarmed 인스턴스 이해
+
+두 설정 모두 앱 시작 지연을 줄이지만 목적과 트래픽 처리 여부가 다릅니다.
+
+| 구분 | **Always-ready instances** | **Prewarmed instances** |
+|---|---|---|
+| **역할** | 앱이 항상 사용할 수 있도록 유지하는 최소 실행 인스턴스 | 다음 scale-out에 빠르게 투입하기 위한 워밍 버퍼 |
+| **평상시 트래픽 처리** | 처리함 | 버퍼 상태에서는 일반 트래픽을 처리하지 않음 |
+| **CLI 설정** | `--minimum-elastic-instance-count` | `--prewarmed-instance-count` |
+| **기본/권장값** | 최소 1 | 기본 1, 대부분의 워크로드에서 1 권장 |
+| **부하 증가 시** | 먼저 요청을 처리 | 활성 인스턴스로 전환되고 새로운 Prewarmed 버퍼가 준비됨 |
+| **부하 감소 시** | 설정된 최소 수까지 유지 | 더 이상 필요하지 않으면 버퍼가 해제됨 |
+
+이 워크숍의 설정(`Always ready = 1`, `Prewarmed = 1`)은 다음과 같이 동작합니다.
+
+```mermaid
+flowchart LR
+    IDLE["낮은 트래픽<br/>Always ready 1개"] -->|"HTTP 부하 증가"| BUFFER
+    BUFFER["Always ready 인스턴스가 활성화되면<br/>Prewarmed 1개를 버퍼로 할당"]
+    BUFFER -->|"추가 처리 용량 필요"| SCALE
+    SCALE["Prewarmed가 활성 인스턴스로 전환<br/>다음 Prewarmed 버퍼 준비"]
+    SCALE -->|"반복"| MAX["Maximum burst 5까지 확장"]
+    MAX -->|"트래픽 감소 후 5–10분부터 검토"| IDLE
+```
+
+### Always-ready instances
+
+- 앱 수준의 **최소 인스턴스 수**입니다. 트래픽이 적거나 없어도 이 수보다 아래로 축소되지 않습니다.
+- 이 모듈의 `--minimum-elastic-instance-count 1`은 production 앱이 최소 한 인스턴스에서 계속 실행됨을 의미합니다.
+- 값을 높이면 기본 처리 용량과 가용성은 증가하지만, 항상 실행되는 인스턴스가 늘어 비용도 증가합니다.
+
+### Prewarmed instances
+
+- HTTP 부하가 증가할 때 새로운 인스턴스를 처음부터 부팅하는 지연을 줄이기 위한 **워밍 버퍼**입니다.
+- Always-ready 인스턴스가 트래픽을 처리하기 시작하면 Prewarmed 인스턴스가 할당됩니다. 부하가 더 증가하면 이 버퍼가 활성 인스턴스로 전환되고, 최대 확장 한도에 도달할 때까지 다음 버퍼가 준비됩니다.
+- `--prewarmed-instance-count 1`은 “활성 인스턴스 외에 항상 1개를 무조건 실행”한다는 의미가 아닙니다. 앱이 유휴 상태라 Prewarmed 버퍼가 할당되지 않은 동안에는 해당 버퍼 비용이 발생하지 않습니다.
+- Prewarmed 인스턴스가 실제로 할당된 시점부터는 초 단위로 과금됩니다. Maximum burst에 도달하면 그 이상 Prewarmed 또는 활성 인스턴스가 추가되지 않습니다.
+
+### Maximum burst와의 관계
+
+`--max-elastic-worker-count 5`는 Plan이 HTTP 부하에 따라 확장할 수 있는 **Maximum burst** 상한입니다. Always-ready와 활성화된 Prewarmed 인스턴스를 포함한 확장은 이 범위 안에서 이루어집니다. 백엔드 데이터베이스처럼 함께 확장되지 않는 의존성이 있다면 상한을 낮춰 과부하를 방지할 수 있습니다.
 
 ---
 
@@ -73,7 +118,9 @@ az appservice plan update -g $RG -n $PLAN --elastic-scale true --max-elastic-wor
 az webapp update -g $RG -n $APP --prewarmed-instance-count 1 --minimum-elastic-instance-count 1
 ```
 
-> 👁️ `--elastic-scale true`는 플랜을 Automatic scaling 모드로 전환합니다. `--max-elastic-worker-count 5`는 이 플랜에서 허용할 최대 인스턴스 수입니다. `--minimum-elastic-instance-count 1`은 항상 유지할 최솟값이며, `--prewarmed-instance-count 1`은 추가로 대기시킬 워밍 인스턴스 수입니다.
+> 👁️ `--elastic-scale true`는 Plan을 Automatic scaling 모드로 전환합니다. `--max-elastic-worker-count 5`는 Maximum burst, `--minimum-elastic-instance-count 1`은 Always-ready 최소값, `--prewarmed-instance-count 1`은 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
+>
+> Automatic scaling을 활성화하면 기존 앱의 **ARR Affinity(세션 선호도)**가 자동으로 비활성화됩니다. 특정 인스턴스에 요청을 고정하지 않아야 여러 인스턴스로 트래픽을 고르게 분산할 수 있기 때문입니다.
 
 ---
 
@@ -160,7 +207,7 @@ Name                                    State    StatusCode
 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
 ```
 
-> 👁️ 축소는 확장보다 느립니다. 플랫폼이 트래픽 감소를 일정 시간 관찰한 후 인스턴스를 회수하므로, `wait` 이후 3–5분이 소요될 수 있습니다.
+> 👁️ 축소는 확장보다 느립니다. 공식 동작 기준으로 플랫폼은 부하 증가가 멈춘 뒤 약 5–10분부터 축소 가능성을 검토하며, 인스턴스를 점진적으로 회수합니다. 환경에 따라 더 오래 걸릴 수 있습니다.
 
 > 👁️ 앱에는 CPU를 실제로 소모하는 `/load?sec=N` 엔드포인트도 있습니다(`hey -z 60s -c 20 $APP_URL/load?sec=1` 등). HTTP 부하 외에 CPU 기반 부하를 실험하고 싶을 때 활용하십시오.
 
@@ -226,6 +273,8 @@ jobs
 # 잔존 프로세스가 있으면
 kill %1
 ```
+
+Always-ready 값이 1보다 크면 해당 수 아래로는 축소되지 않습니다. 또한 같은 Plan에 여러 앱이 있으면 Plan은 앱별 Always-ready 요구사항 가운데 가장 높은 값과 기존 할당 인스턴스를 고려하므로, 현재 앱의 설정값보다 Plan 인스턴스 수가 많아 보일 수 있습니다.
 
 ### (3) hey 설치 실패
 
