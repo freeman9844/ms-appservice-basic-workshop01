@@ -13,7 +13,7 @@
 - **Log Analytics Workspace** 와 **Application Insights 컴포넌트** 를 연결합니다.
 - 기본 호스트네임(`APP_URL`)을 조회하여 앱 엔드포인트를 확인합니다.
 
-1단계 완료 후 생성되는 리소스 구조는 다음과 같습니다.
+1단계에서 생성되는 리소스와 이후 08 모듈에서 구성할 관찰 연결은 다음과 같습니다.
 
 ```mermaid
 flowchart LR
@@ -33,8 +33,13 @@ flowchart LR
             LAW[("Log Analytics Workspace<br/>log-appsvcworkshop-SUFFIX")]
             APPI -->|"workspace 연결"| LAW
         end
+
+        APP -.->|"앱 텔레메트리<br/>(08 모듈에서 연결)"| APPI
+        APP -.->|"플랫폼 로그<br/>(08 모듈에서 연결)"| LAW
     end
 ```
+
+> 👁️ 02 모듈에서는 관찰 리소스만 생성합니다. Web App의 텔레메트리와 플랫폼 로그를 전송하는 점선 연결은 [08. 관찰 가능성](08-observability.md) 모듈에서 구성합니다.
 
 ---
 
