@@ -61,12 +61,29 @@ az webapp traffic-routing show -g $RG -n $APP -o table
 for i in $(seq 1 100); do curl -s $APP_URL/api/info | jq -r .version; done | sort | uniq -c
 ```
 
+📋 **예상 출력** (`traffic-routing set`)
+
+```json
+[
+  {
+    "actionHostName": "app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net",
+    "changeDecisionCallbackUrl": null,
+    "changeIntervalInMinutes": null,
+    "changeStep": null,
+    "maxReroutePercentage": null,
+    "minReroutePercentage": null,
+    "name": "staging",
+    "reroutePercentage": 20.0
+  }
+]
+```
+
 📋 **예상 출력** (`traffic-routing show`)
 
 ```
-ActionHostName                    ReroutePercentage    Name
---------------------------------  -------------------  -------
-app-appsvcworkshop-<SUFFIX>-staging   20.0                 staging
+ActionHostName                                          Name     ReroutePercentage
+------------------------------------------------------  -------  -------------------
+app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 ```
 
 📋 **예상 출력** (분포 측정)
@@ -77,6 +94,21 @@ app-appsvcworkshop-<SUFFIX>-staging   20.0                 staging
 ```
 
 > 👁️ **확률적 분배 — 오차는 정상입니다.** Azure 트래픽 라우팅은 무작위로 분배하므로 100회 요청에서 ±10 수준의 오차가 발생할 수 있습니다. 더 많은 요청을 보낼수록 이론값(80/20)에 수렴합니다.
+>
+> 결과가 아래처럼 반대로 나타난다면 05 모듈의 롤백을 수행하지 않아 **production = v2, staging = v1**인 상태입니다. `20%`는 특정 버전이 아니라 **staging 슬롯으로 보내는 비율**이므로 staging에 있는 v1이 약 20%, production의 v2가 약 80%로 측정됩니다.
+>
+> ```
+>      19 v1
+>      81 v2
+> ```
+>
+> 이 모듈의 이후 단계와 종료 상태를 맞추려면 라우팅을 지운 뒤 한 번 스왑하여 **production = v1, staging = v2**로 복원하고 20% 분기를 다시 설정합니다.
+>
+> ```bash
+> az webapp traffic-routing clear -g $RG -n $APP
+> az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
+> az webapp traffic-routing set -g $RG -n $APP --distribution staging=20
+> ```
 
 > 👁️ **쿠키 sticky 동작 — curl과 브라우저가 다른 이유**
 >
@@ -143,9 +175,9 @@ az webapp traffic-routing show -g $RG -n $APP -o table
 📋 **예상 출력**
 
 ```
-ActionHostName                    ReroutePercentage    Name
---------------------------------  -------------------  -------
-app-appsvcworkshop-<SUFFIX>-staging   20.0                 staging
+ActionHostName                                          Name     ReroutePercentage
+------------------------------------------------------  -------  -------------------
+app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 ```
 
 ### 카나리 승격 후 버전 확인
