@@ -13,6 +13,20 @@
 - **Log Analytics Workspace** 와 **Application Insights 컴포넌트** 를 연결합니다.
 - 기본 호스트네임(`APP_URL`)을 조회하여 앱 엔드포인트를 확인합니다.
 
+1단계 완료 후 생성되는 리소스 구조는 다음과 같습니다.
+
+```mermaid
+flowchart TB
+    subgraph RG["Resource Group<br/>rg-appsvcworkshop-SUFFIX"]
+        subgraph PLAN["App Service Plan<br/>plan-appsvcworkshop-SUFFIX · P0v4 · Linux"]
+            APP["Web App<br/>app-appsvcworkshop-SUFFIX<br/>Python 3.12"]
+        end
+        APPI["Application Insights<br/>appi-appsvcworkshop-SUFFIX"]
+        LAW[("Log Analytics Workspace<br/>log-appsvcworkshop-SUFFIX")]
+        APPI -->|"workspace 연결"| LAW
+    end
+```
+
 ---
 
 ## 1단계 — 환경 변수 정의 및 리소스 생성
