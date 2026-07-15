@@ -16,14 +16,23 @@
 1단계 완료 후 생성되는 리소스 구조는 다음과 같습니다.
 
 ```mermaid
-flowchart TB
-    subgraph RG["Resource Group<br/>rg-appsvcworkshop-SUFFIX"]
-        subgraph PLAN["App Service Plan<br/>plan-appsvcworkshop-SUFFIX · P0v4 · Linux"]
+flowchart LR
+    subgraph RG["Resource Group: rg-appsvcworkshop-SUFFIX"]
+        direction LR
+
+        subgraph COMPUTE["App Service 컴퓨트"]
+            direction TB
+            PLAN["App Service Plan<br/>plan-appsvcworkshop-SUFFIX<br/>P0v4 · Linux"]
             APP["Web App<br/>app-appsvcworkshop-SUFFIX<br/>Python 3.12"]
+            PLAN -->|"호스팅"| APP
         end
-        APPI["Application Insights<br/>appi-appsvcworkshop-SUFFIX"]
-        LAW[("Log Analytics Workspace<br/>log-appsvcworkshop-SUFFIX")]
-        APPI -->|"workspace 연결"| LAW
+
+        subgraph MONITOR["관찰 리소스"]
+            direction TB
+            APPI["Application Insights<br/>appi-appsvcworkshop-SUFFIX"]
+            LAW[("Log Analytics Workspace<br/>log-appsvcworkshop-SUFFIX")]
+            APPI -->|"workspace 연결"| LAW
+        end
     end
 ```
 
