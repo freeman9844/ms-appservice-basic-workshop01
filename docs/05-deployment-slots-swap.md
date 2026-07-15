@@ -18,12 +18,43 @@
 ```mermaid
 flowchart LR
     U(("🌐 사용자")) -->|"production URL"| P
-    subgraph APP["App Service 앱 (app-appsvcworkshop-SUFFIX)"]
-        P["🔵 **production 슬롯**<br/>v1"]
-        S["🟢 **staging 슬롯**<br/>v2"]
-        P <-->|"스왑 시 교체"| S
+    T(("🧪 테스트 사용자")) -->|"staging URL"| S
+    subgraph PLAN["App Service Plan P0v4<br/>(컴퓨트·확장·비용 공유)"]
+        subgraph APP["Web App: app-appsvcworkshop-SUFFIX"]
+            P["🔵 production 슬롯<br/>v1"]
+            S["🟢 staging 슬롯<br/>v2"]
+            P <-->|"워밍업 후 스왑"| S
+        end
     end
 ```
+
+---
+
+## 👁️ 배포 슬롯 이해
+
+배포 슬롯은 하나의 Web App 안에 만드는 **별도의 실행 환경**입니다. 각 슬롯은 고유한 호스트 이름을 가진 실제 동작 중인 앱이므로, 새 버전을 production에 바로 배포하지 않고 staging에서 먼저 테스트할 수 있습니다.
+
+| 구분 | production 슬롯 | staging 슬롯 |
+|---|---|---|
+| **역할** | 실제 사용자 트래픽을 처리하는 기본 슬롯 | 새 버전을 배포하고 검증하는 비프로덕션 슬롯 |
+| **URL** | `https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net` | `https://app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net` |
+| **이 모듈의 최초 버전** | v1(파랑) | 생성 후 v2(초록) 배포 |
+
+**슬롯이 공유하는 것**
+
+- 같은 App Service Plan의 CPU·메모리와 인스턴스 수
+- Plan의 최대 컴퓨트 용량과 과금
+- 슬롯 자체에 대한 별도 Plan 비용은 없지만, 모든 슬롯이 같은 컴퓨트 용량을 나누어 사용
+
+**슬롯별로 구분되는 것**
+
+- 배포된 애플리케이션 코드와 고유 URL
+- 앱 설정과 연결 문자열(스왑 가능 설정 또는 슬롯 고정 설정으로 구성)
+- 배포 상태와 실행 프로세스
+
+**스왑 시 동작**
+
+App Service는 staging을 먼저 워밍업한 뒤 production과 라우팅을 전환합니다. 일반 앱 설정과 코드는 함께 이동하지만, `--slot-settings`로 지정한 슬롯 고정 설정은 원래 슬롯에 남습니다. 스왑 후 staging에는 이전 production 버전이 보존되므로 문제가 있으면 같은 명령으로 즉시 되돌릴 수 있습니다.
 
 ---
 
@@ -192,7 +223,7 @@ v2
 
 | 개념 | 설명 |
 |---|---|
-| **배포 슬롯** | 같은 App Service Plan 안에서 독립적으로 운영되는 앱 인스턴스; production과 staging이 서로 다른 URL을 가짐 |
+| **배포 슬롯** | 같은 App Service Plan의 컴퓨트를 공유하면서 고유 URL·코드·설정을 갖는 실행 중인 앱 환경 |
 | **슬롯 스왑** | 코드 재배포 없이 production ↔ staging 라우팅을 교환하는 무중단 전환; 롤백은 재스왑 한 번 |
 | **sticky 설정 (슬롯 고정 설정)** | `--slot-settings`로 지정한 앱 설정은 스왑 후에도 해당 슬롯에 남음(예: staging 전용 DB 연결 문자열) |
 | **워밍업** | 스왑 전 대상 슬롯이 HTTP 200 헬스 체크를 통과할 때까지 플랫폼이 대기 — 다운타임 없음 |
