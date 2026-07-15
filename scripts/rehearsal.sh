@@ -2,7 +2,7 @@
 set -euo pipefail
 export AZURE_CORE_ONLY_SHOW_ERRORS=true
 
-SUFFIX="${SUFFIX:-$RANDOM$RANDOM}"; SUFFIX="${SUFFIX:0:5}"
+SUFFIX="${SUFFIX:-$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))}"
 LOC="${LOC:-koreacentral}"
 RG="rg-appsvcworkshop-$SUFFIX"
 PLAN="plan-appsvcworkshop-$SUFFIX"

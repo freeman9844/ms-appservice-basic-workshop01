@@ -17,14 +17,14 @@
 
 ## 1단계 — 환경 변수 정의 및 리소스 생성
 
-`SUFFIX`는 여러 참가자의 리소스 이름이 겹치지 않도록 구분하는 값입니다. 원하는 **5자리 숫자**를 직접 입력하고 이후 모듈에서 다시 사용할 수 있도록 메모해 두세요.
+`SUFFIX`는 여러 참가자의 리소스 이름이 겹치지 않도록 구분하는 값입니다. 아래 명령은 **5자리 난수**를 자동으로 생성합니다.
 
-예를 들어 `04271`을 사용하려면 `SUFFIX="04271"`로 입력합니다. 앱 이름이 이미 사용 중이라는 오류가 발생하면 다른 숫자로 변경하여 다시 실행하세요.
+생성된 값은 이후 모든 모듈에서 다시 사용하므로 `echo`로 출력된 값을 반드시 메모해 두세요. 예를 들어 `SUFFIX=04271`처럼 표시됩니다.
 
 🟢 **실행**
 
 ```bash
-SUFFIX="04271"   # 예시: 원하는 5자리 숫자로 변경
+SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
@@ -155,10 +155,10 @@ Running
 ### (1) 앱 이름 전역 중복 오류
 
 Web App 이름(`$APP`)은 `azurewebsites.net` 도메인에서 **전 세계적으로 고유** 해야 합니다.
-`The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생하면 다른 5자리 숫자를 입력하여 변수 전체를 재정의하고 명령을 재실행합니다.
+`The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생하면 새 난수를 생성하여 변수 전체를 재정의하고 명령을 재실행합니다.
 
 ```bash
-SUFFIX="58316"   # 예시: 기존 값과 다른 5자리 숫자
+SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
@@ -178,7 +178,7 @@ az appservice list-locations --linux-workers-enabled --sku P0V4 -o table
 목록에 **Korea Central**이 없거나 `P0V4` 생성이 실패하면, 출력에 표시된 지원 리전을 선택하고 새로운 `SUFFIX`로 리소스 이름을 다시 정의한 뒤 1단계를 재실행합니다.
 
 ```bash
-SUFFIX="58316"   # 기존 값과 다른 5자리 숫자
+SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))
 LOC=eastasia     # 예시: 위 명령에서 확인한 지원 리전
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
