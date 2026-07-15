@@ -43,7 +43,7 @@ flowchart LR
 | 항목 | 설명 |
 |------|------|
 | Azure 구독 | 소유자 또는 기여자 역할 보유 |
-| Cloud Shell | Azure Portal의 Bash Cloud Shell(별도 설치 불필요) — 영구 스토리지 마운트 권장 |
+| Cloud Shell | Azure Portal의 Bash Cloud Shell(별도 설치 불필요) |
 | 웹앱 기본 개념 | HTTP 요청·응답, 환경변수 개념 이해(컨테이너·Kubernetes 지식 불필요) |
 | 비용 | 실습 완료 후 정리 모듈(12) 수행 권장(예상 비용: 아래 비용 개요 참조) |
 
@@ -58,7 +58,7 @@ flowchart LR
 | # | 모듈 | 한 줄 설명 |
 |---|------|------------|
 | 00 | (현재 문서) | 워크숍 전체 개요·목표·시간표 |
-| 01 | [사전 준비](docs/01-prerequisites.md) | Cloud Shell 영구 스토리지 마운트, az CLI 버전·확장 확인, 리포지토리 클론 |
+| 01 | [사전 준비](docs/01-prerequisites.md) | Cloud Shell 접속·구독 선택, az CLI 버전·확장 확인, 리포지토리 클론 |
 | 02 | [환경 준비](docs/02-environment-setup.md) | 리소스 그룹 → App Service Plan(P0v3) → Web App(Python) → LAW·App Insights 생성 |
 | 03 | [코드 배포 & 외부 접속](docs/03-deploy-code.md) | zip deploy(Oryx 빌드) → 브라우저/curl 접속 확인 → 로그 스트리밍 |
 | 04 | [앱 설정·환경변수](docs/04-app-settings.md) | 앱 설정 추가·변경으로 동작 전환, 설정 변경 = 재시작 체감 |
@@ -98,7 +98,7 @@ flowchart LR
 | 모듈 | 제목 | 예상 시간 | 주 소요 요인(실측) |
 |------|------|-----------|--------------------|
 | 00 | 개요 | ~5분 | — |
-| 01 | 사전 준비 | ~10분 | Cloud Shell 최초 기동·스토리지 마운트 |
+| 01 | 사전 준비 | ~10분 | Cloud Shell 최초 기동·구독 확인·확장 설치 |
 | 02 | 환경 준비 | 10–15분 | 리소스 프로비저닝 대기 2–3분 |
 | 03 | 코드 배포 & 외부 접속 | 8–12분 | Oryx 빌드 대기 2–3분 |
 | 04 | 앱 설정·환경변수 | 5–8분 | 설정 변경 후 재시작 전파 ~40초 |
@@ -149,7 +149,7 @@ flowchart LR
 
 | 증상 | 참조 모듈 |
 |------|-----------|
-| Cloud Shell 영구 스토리지 마운트·az 확장 오류 | [01 사전 준비](docs/01-prerequisites.md#트러블슈팅) |
+| Cloud Shell 구독 선택·az 확장 오류 | [01 사전 준비](docs/01-prerequisites.md#트러블슈팅) |
 | 리소스 그룹·Plan·Web App 생성 오류 | [02 환경 준비](docs/02-environment-setup.md#트러블슈팅) |
 | 배포 후 앱이 응답하지 않음 | [03 코드 배포 & 외부 접속](docs/03-deploy-code.md#트러블슈팅) |
 | 앱 설정 변경 후 동작이 바뀌지 않음 | [04 앱 설정·환경변수](docs/04-app-settings.md#트러블슈팅) |

@@ -1,6 +1,6 @@
 # 01. 사전 준비
 
-> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
 
 ---
 
@@ -8,7 +8,6 @@
 
 이 모듈에서는 워크숍 전반에 걸쳐 사용할 Azure Cloud Shell 환경을 준비합니다.
 
-- Azure Cloud Shell에서 **영구 스토리지를 마운트**합니다.
 - 실습에 사용할 Azure 구독을 확인합니다.
 - 실습에 필요한 CLI 확장(`application-insights`, `authV2`, `log-analytics`)을 설치합니다.
 - 워크숍 리포지토리를 `git clone`으로 가져옵니다.
@@ -18,16 +17,6 @@
 ## 1단계 — Cloud Shell 접속 및 구독 선택
 
 브라우저에서 [https://shell.azure.com](https://shell.azure.com) 을 열어 **Bash** 를 선택합니다.
-
-최초 접속 시 스토리지 선택 화면이 표시됩니다. **반드시 `Mount storage account` 라디오 버튼을 선택**하고 구독을 지정한 뒤 **Apply** 를 클릭합니다.
-
-> ⚠️ **경고 — 임시 스토리지 선택 금지**
->
-> `No storage account required` 옵션을 선택하면 Cloud Shell이 임시 디스크로 동작합니다.
-> 세션 종료 시 설치한 확장·클론한 리포·작성한 스크립트가 **모두 삭제**됩니다.
-> 반드시 `Mount storage account` → 구독 선택 → **Apply** 순서로 진행하십시오.
-
-🖼️ **예상 화면** — Cloud Shell 영구 스토리지 마운트 선택 화면
 
 Cloud Shell은 Azure Portal에 로그인된 계정으로 자동 인증되므로 별도 `az login`은 필요하지 않습니다. 아래 명령으로 현재 구독과 CLI 버전을 확인합니다.
 
@@ -114,12 +103,7 @@ app.py  ...
 
 ## 트러블슈팅
 
-### (1) Cloud Shell 세션 유실 — 확장·클론 파일 사라짐
-
-Cloud Shell을 임시 스토리지(`No storage account required`)로 시작한 경우, 세션 종료 시 모든 파일이 삭제됩니다.
-Cloud Shell을 완전히 종료한 뒤 다시 접속하여 **1단계**부터 `Mount storage account`를 선택해 재시작하십시오.
-
-### (2) 확장 설치 실패
+### (1) 확장 설치 실패
 
 네트워크 오류나 타임아웃으로 설치가 실패한 경우 동일 명령을 재시도합니다.
 
@@ -135,7 +119,7 @@ az extension add --name log-analytics --upgrade --only-show-errors
 az upgrade
 ```
 
-### (3) 구독이 여러 개인 경우
+### (2) 구독이 여러 개인 경우
 
 `az account show`에서 잘못된 구독이 표시되면 아래 명령으로 전환합니다.
 
