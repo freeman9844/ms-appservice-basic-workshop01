@@ -33,15 +33,33 @@ LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
 echo "SUFFIX=$SUFFIX"   # ⚠️ 이후 모듈에서 재사용
 
+# 1. 모든 워크숍 리소스를 담을 리소스 그룹 생성
 az group create -n $RG -l $LOC
+
+# 2. Linux 기반 Premium V3 App Service Plan 생성
+#    P0V3는 배포 슬롯·자동 스케일·사이드카 실습에 필요한 컴퓨트 환경
 az appservice plan create -g $RG -n $PLAN --is-linux --sku P0V3
+
+# 3. 위 Plan에 Python 3.12 런타임을 사용하는 Web App 생성
 az webapp create -g $RG -n $APP --plan $PLAN --runtime "PYTHON:3.12"
+
+# 4. App Service 로그와 메트릭을 수집할 Log Analytics Workspace 생성
 az monitor log-analytics workspace create -g $RG -n $LAW -l $LOC
+
+# 5. Application Insights 연결에 사용할 Workspace 리소스 ID 조회
+#    명령 결과를 LAW_ID 셸 변수에 저장
 LAW_ID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query id -o tsv)
+
+# 6. Application Insights 관리 명령을 제공하는 CLI 확장 설치·업그레이드
 az extension add --name application-insights --upgrade --only-show-errors
+
+# 7. Log Analytics Workspace와 연결된 Application Insights 컴포넌트 생성
 az monitor app-insights component create -g $RG --app $APPI -l $LOC --workspace $LAW_ID
 
+# 8. Web App의 Azure 기본 호스트 이름을 조회해 HTTPS 접속 URL 구성
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+
+# 9. 브라우저와 이후 모듈에서 사용할 앱 URL 출력
 echo $APP_URL
 ```
 
