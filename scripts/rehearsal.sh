@@ -30,9 +30,9 @@ az extension add --name application-insights --upgrade --only-show-errors
 az extension add --name authV2 --upgrade --only-show-errors
 az extension add --name log-analytics --upgrade --only-show-errors
 
-echo "===== [02] RG + Plan(P0v3) + Web App + LAW + App Insights ($(date +%T)) ====="
+echo "===== [02] RG + Plan(P0v4) + Web App + LAW + App Insights ($(date +%T)) ====="
 az group create -n "$RG" -l "$LOC" -o none
-az appservice plan create -g "$RG" -n "$PLAN" --is-linux --sku P0V3 -o none
+az appservice plan create -g "$RG" -n "$PLAN" --is-linux --sku P0V4 -o none
 az webapp create -g "$RG" -n "$APP" --plan "$PLAN" --runtime "PYTHON:3.12" -o none
 az monitor log-analytics workspace create -g "$RG" -n "$LAW" -l "$LOC" -o none
 LAW_ID=$(az monitor log-analytics workspace show -g "$RG" -n "$LAW" --query id -o tsv)

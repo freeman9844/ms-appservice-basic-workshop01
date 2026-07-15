@@ -10,7 +10,7 @@
 flowchart LR
   user([사용자]) -->|HTTPS| prod[production 슬롯<br/>v1]
   user -.->|"카나리 20%"| stg[staging 슬롯<br/>v2]
-  subgraph plan ["App Service Plan P0v3 (Linux · 1→N 인스턴스)"]
+  subgraph plan ["App Service Plan P0v4 (Linux · 1→N 인스턴스)"]
     prod; stg
   end
   prod -. 진단 로그/텔레메트리 .-> law[(Log Analytics<br/>+ App Insights)]
@@ -59,7 +59,7 @@ flowchart LR
 |---|------|------------|
 | 00 | (현재 문서) | 워크숍 전체 개요·목표·시간표 |
 | 01 | [사전 준비](docs/01-prerequisites.md) | Cloud Shell 접속·구독 선택, az CLI 버전·확장 확인, 리포지토리 클론 |
-| 02 | [환경 준비](docs/02-environment-setup.md) | 리소스 그룹 → App Service Plan(P0v3) → Web App(Python) → LAW·App Insights 생성 |
+| 02 | [환경 준비](docs/02-environment-setup.md) | 리소스 그룹 → App Service Plan(P0v4) → Web App(Python) → LAW·App Insights 생성 |
 | 03 | [코드 배포 & 외부 접속](docs/03-deploy-code.md) | zip deploy(Oryx 빌드) → 브라우저/curl 접속 확인 → 로그 스트리밍 |
 | 04 | [앱 설정·환경변수](docs/04-app-settings.md) | 앱 설정 추가·변경으로 동작 전환, 설정 변경 = 재시작 체감 |
 | 05 | [배포 슬롯 & 스왑](docs/05-deployment-slots-swap.md) | staging 슬롯 생성 → v2 배포 → 슬롯 URL 확인 → 무중단 swap → 롤백(재 swap) |
@@ -121,12 +121,12 @@ flowchart LR
 
 | 리소스 | 과금 방식 | 비고 |
 |--------|-----------|------|
-| App Service Plan P0v3 (Linux) | 인스턴스 실행 시간 기준 시간 단위 과금 | 슬롯 추가 과금 없음(같은 Plan 공유) |
+| App Service Plan P0v4 (Linux) | 인스턴스 실행 시간 기준 시간 단위 과금 | 슬롯 추가 과금 없음(같은 Plan 공유) |
 | Log Analytics Workspace | 수집 데이터 GB 단위 과금 | 실습 수준 데이터 소량 |
 | Application Insights (workspace-based) | 수집 데이터 GB 단위 과금 | 실습 수준 소량 |
 | Entra ID 앱 등록 | 무료 | 12 정리에서 삭제 필수 |
 
-전체 실습(약 2시간 32분) 기준 예상 비용: **USD $1 미만** — P0v3 1인스턴스 약 2.5시간 + 자동 스케일 순간 확장(최대 5인스턴스, 수 분) 합산 기준. 실습 종료 즉시 정리(12) 수행을 권장합니다. 요금은 리전·통화·시점에 따라 변동될 수 있습니다.
+전체 실습(약 2시간 32분) 기준 예상 비용: **USD $1 미만** — P0v4 1인스턴스 약 2.5시간 + 자동 스케일 순간 확장(최대 5인스턴스, 수 분) 합산 기준. 실습 종료 즉시 정리(12) 수행을 권장합니다. 요금은 리전·통화·시점에 따라 변동될 수 있습니다.
 
 ---
 
@@ -167,6 +167,7 @@ flowchart LR
 ## 참고 자료
 
 - [Azure App Service 개요](https://learn.microsoft.com/azure/app-service/overview)
+- [Premium v4 계층 구성 및 지원 리전](https://learn.microsoft.com/azure/app-service/app-service-configure-premium-v4-tier)
 - [배포 슬롯](https://learn.microsoft.com/azure/app-service/deploy-staging-slots)
 - [Automatic scaling](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)
 - [진단 로그](https://learn.microsoft.com/azure/app-service/troubleshoot-diagnostic-logs)
