@@ -81,6 +81,43 @@ zip -r /tmp/app-v1.zip . -x "tests/*" -x "__pycache__/*" -x "*.pyc"
 az webapp deploy -g $RG -n $APP --src-path /tmp/app-v1.zip --type zip --track-status
 ```
 
+📋 **예상 출력** (배포 ID와 시각은 실행할 때마다 달라집니다)
+
+```text
+  adding: requirements.txt (deflated 1%)
+  adding: app.py (deflated 49%)
+Note: 'az webapp deploy' does not run build automation (dependency installation,
+compilation, etc.) by default for Linux web apps. If your package is not pre-built,
+set the app setting SCM_DO_BUILD_DURING_DEPLOYMENT=true to enable builds during deployment.
+Initiating deployment
+Deploying from local path: /tmp/app-v1.zip
+Warming up Kudu before deployment.
+Warmed up Kudu instance successfully.
+Polling the status of sync deployment. Start Time: <배포 시작 시각> UTC
+Status: Build successful. Time: 1(s)
+Status: Site started successfully. Time: 16(s)
+Deployment has completed successfully
+You can visit your app at: http://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
+{
+  "id": "/subscriptions/<subscription-id>/resourceGroups/rg-appsvcworkshop-<SUFFIX>/providers/Microsoft.Web/sites/app-appsvcworkshop-<SUFFIX>/deploymentStatus/<deployment-id>",
+  "location": "Korea Central",
+  "name": "<deployment-id>",
+  "properties": {
+    "deploymentId": "<deployment-id>",
+    "errors": null,
+    "failedInstancesLogs": null,
+    "numberOfInstancesFailed": 0,
+    "numberOfInstancesInProgress": 0,
+    "numberOfInstancesSuccessful": 1,
+    "status": "RuntimeSuccessful"
+  },
+  "resourceGroup": "rg-appsvcworkshop-<SUFFIX>",
+  "type": "Microsoft.Web/sites/deploymentStatus"
+}
+```
+
+> 👁️ `Build successful`, `Site started successfully`, `Deployment has completed successfully`, `"status": "RuntimeSuccessful"`이 표시되면 배포가 완료된 것입니다. 출력의 Note는 일반 안내이며, 1단계에서 `SCM_DO_BUILD_DURING_DEPLOYMENT=true`를 이미 설정했으므로 Oryx 빌드가 정상 실행됩니다.
+
 > 👁️ **참고** — `-x "tests/*" -x "__pycache__/*" -x "*.pyc"` 옵션으로 테스트 파일과 캐시를 제외합니다.
 > `tests/` 디렉터리가 포함되더라도 동작에는 영향이 없으나 zip 크기가 늘어납니다.
 
