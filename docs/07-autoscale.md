@@ -192,25 +192,6 @@ Usage: hey [options...] <url>
 
 이번 모듈의 관찰 포인트는 “메트릭이 늘어났는가”가 아니라 **같은 앱에서 `Prewarmed=0` 과 `Prewarmed=1`이 실제 응답 인스턴스 분산 시점에 어떤 차이를 만드는가**입니다. 먼저 `STARTUP_DELAY_SECONDS=20`으로 새 인스턴스 시작 지연을 키우고, 재사용 가능한 헬퍼 함수로 두 시험을 같은 조건에서 실행합니다.
 
-🟢 **실행 — 시작 지연 설정 및 앱 준비**
-
-```bash
-az webapp config appsettings set -g "$RG" -n "$APP" \
-  --settings STARTUP_DELAY_SECONDS=20 --output none
-
-for attempt in $(seq 1 18); do
-  curl -fsS "$APP_URL/health" >/dev/null && break
-  sleep 5
-done
-curl -fsS "$APP_URL/health"
-```
-
-📋 **예상 출력**
-
-```json
-{"ok":true}
-```
-
 🟢 **실행 — 기준 상태 확인과 A/B 측정용 헬퍼 정의**
 
 ```bash
@@ -288,6 +269,31 @@ measure_scale_out() {
 > 👁️ 여기서 `InstanceCount` 메트릭은 **시험 시작 전 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 측정 결과는 `/api/info`가 돌려주는 **응답 인스턴스 ID가 2종류 이상으로 보이기까지 걸린 시간**입니다.
 >
 > `wait_for_single_instance`는 메트릭 공백을 `InstanceCount=missing`으로 취급하며, **실제 메트릭 값이 정확히 `1`일 때만** 기준 상태로 인정합니다. Azure Portal에서는 같은 메트릭을 **Automatic Scaling Instance Count**로 볼 수 있습니다.
+
+🟢 **실행 — 시작 지연 설정 및 앱 준비**
+
+```bash
+az webapp config appsettings set -g "$RG" -n "$APP" \
+  --settings STARTUP_DELAY_SECONDS=20 --output none
+
+for attempt in $(seq 1 18); do
+  curl -fsS "$APP_URL/health" >/dev/null && break
+  sleep 5
+done
+
+if curl -fsS "$APP_URL/health"; then
+  :
+else
+  restore_autoscale_defaults
+  echo "시작 지연 준비 단계의 /health 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제를 마쳤으니 Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
+fi
+```
+
+📋 **예상 출력**
+
+```json
+{"ok":true}
+```
 
 ---
 
