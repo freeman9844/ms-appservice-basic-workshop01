@@ -33,6 +33,18 @@ def _clamp(raw, cap):
         return 0
 
 
+def _apply_startup_delay(raw=None):
+    """Apply an opt-in process startup delay for the scaling workshop."""
+    value = os.environ.get("STARTUP_DELAY_SECONDS") if raw is None else raw
+    delay = _clamp(value, 30)
+    if delay:
+        time.sleep(delay)
+    return delay
+
+
+_apply_startup_delay()
+
+
 def _slot():
     # Linux App Service는 컨테이너에 WEBSITE_SLOT_NAME을 주입하지 않음(실측).
     # WEBSITE_HOSTNAME(슬롯별 호스트명)에서 슬롯 이름을 파싱해 보완한다.

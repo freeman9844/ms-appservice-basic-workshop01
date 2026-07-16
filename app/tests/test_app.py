@@ -2,6 +2,7 @@ import sys
 import os
 
 import redis
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -75,3 +76,33 @@ def test_cache_degrades_without_redis(monkeypatch):
     r = client().get("/cache")
     assert r.status_code == 200
     assert r.get_json()["cache"] == "unavailable"
+
+
+def test_startup_delay_disabled_by_default(monkeypatch):
+    calls = []
+    monkeypatch.delenv("STARTUP_DELAY_SECONDS", raising=False)
+    monkeypatch.setattr(app_module.time, "sleep", calls.append)
+
+    assert app_module._apply_startup_delay() == 0
+    assert calls == []
+
+
+def test_startup_delay_sleeps_for_configured_seconds(monkeypatch):
+    calls = []
+    monkeypatch.setenv("STARTUP_DELAY_SECONDS", "20")
+    monkeypatch.setattr(app_module.time, "sleep", calls.append)
+
+    assert app_module._apply_startup_delay() == 20
+    assert calls == [20]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("-1", 0), ("abc", 0), ("99", 30)],
+)
+def test_startup_delay_is_clamped(monkeypatch, raw, expected):
+    calls = []
+    monkeypatch.setattr(app_module.time, "sleep", calls.append)
+
+    assert app_module._apply_startup_delay(raw) == expected
+    assert calls == ([expected] if expected else [])
