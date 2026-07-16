@@ -12,12 +12,18 @@ APPI="appi-appsvcworkshop-$SUFFIX"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_DIR=$(mktemp -d)
 CLIENT_ID=""
+APP_ID=""
 HEY_PID=""
+PREWARMED_RESTORE_NEEDED=0
 
 cleanup() {
   if [ -n "$HEY_PID" ]; then
     kill "$HEY_PID" 2>/dev/null || true
     wait "$HEY_PID" 2>/dev/null || true
+    HEY_PID=""
+  fi
+  if [ "$PREWARMED_RESTORE_NEEDED" = "1" ] && [ -n "$APP_ID" ]; then
+    restore_prewarmed_demo
   fi
   rm -rf "$TMP_DIR"
 }
@@ -138,12 +144,14 @@ wait_for_single_instance() {
 }
 
 restore_prewarmed_demo() {
+  [ -n "$APP_ID" ] || return 0
   az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
     -o none || true
   az webapp config appsettings delete -g "$RG" -n "$APP" \
     --setting-names STARTUP_DELAY_SECONDS -o none || true
+  PREWARMED_RESTORE_NEEDED=0
 }
 
 measure_scale_out() {
@@ -153,7 +161,7 @@ measure_scale_out() {
   local started elapsed unique_instances
 
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
-  local load_pid=$!
+  HEY_PID=$!
   started=$(date +%s)
   printf -v "$result_var" '%s' timeout
 
@@ -172,12 +180,14 @@ measure_scale_out() {
     sleep 5
   done
 
-  kill "$load_pid" 2>/dev/null || true
-  wait "$load_pid" 2>/dev/null || true
+  kill "$HEY_PID" 2>/dev/null || true
+  wait "$HEY_PID" 2>/dev/null || true
+  HEY_PID=""
 }
 
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 -o none
+PREWARMED_RESTORE_NEEDED=1
 
 for attempt in $(seq 1 18); do
   curl -fsS "$APP_URL/health" >/dev/null && break
