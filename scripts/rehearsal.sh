@@ -94,40 +94,141 @@ az webapp traffic-routing clear -g "$RG" -n "$APP"
 az webapp deployment slot swap -g "$RG" -n "$APP" --slot staging --target-slot production
 [ "$(curl -s "$APP_URL/api/info" | jq -r .version)" = "v2" ] && echo "[06] 승격 OK (prod=v2)"
 
-echo "===== [07] Automatic scaling + hey 부하 ($(date +%T)) ====="
+echo "===== [07] Automatic scaling + Prewarmed A/B ($(date +%T)) ====="
 PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 az rest --method patch --uri "${PLAN_ID}?api-version=2024-11-01" \
   --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' -o none
 az rest --method patch --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' -o none
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
   go install github.com/rakyll/hey@latest
-  export PATH="$HOME/go/bin:$PATH"; }
-PREWARM_OBSERVATION_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prewarmed.out"
-PREWARMED_INSTANCE_COUNT=0
-for attempt in $(seq 1 6); do
-  PREWARMED_INSTANCE_COUNT=$(az monitor metrics list \
+  export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"; }
+
+latest_instance_count() {
+  local start
+  start=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+  az monitor metrics list \
     --resource "$APP_ID" --metric InstanceCount --interval PT1M \
-    --aggregation Maximum --start-time "$PREWARM_OBSERVATION_START" -o json |
-    jq '[.value[0].timeseries[0].data[].maximum // empty] | max // 0 | floor')
-  echo "[07] Prewarmed 관찰 InstanceCount=$PREWARMED_INSTANCE_COUNT"
-  [ "$PREWARMED_INSTANCE_COUNT" -ge 2 ] && break
-  sleep 30
+    --aggregation Maximum --start-time "$start" -o json |
+    jq -er '
+      [.value[0].timeseries[0].data[].maximum // empty]
+      | if length == 0 then
+          error("InstanceCount metric unavailable")
+        else
+          last | floor
+        end
+    '
+}
+
+wait_for_single_instance() {
+  local count
+  for attempt in $(seq 1 20); do
+    if ! count=$(latest_instance_count 2>/dev/null); then
+      echo "InstanceCount=missing"
+      sleep 30
+      continue
+    fi
+    echo "InstanceCount=$count"
+    [ "$count" -eq 1 ] && return 0
+    sleep 30
+  done
+  return 1
+}
+
+restore_prewarmed_demo() {
+  az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+    -o none || true
+  az webapp config appsettings delete -g "$RG" -n "$APP" \
+    --setting-names STARTUP_DELAY_SECONDS -o none || true
+}
+
+measure_scale_out() {
+  local label=$1
+  local output_file=$2
+  local result_var=$3
+  local started elapsed unique_instances
+
+  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
+  local load_pid=$!
+  started=$(date +%s)
+  printf -v "$result_var" '%s' timeout
+
+  for attempt in $(seq 1 36); do
+    unique_instances=$(
+      for i in $(seq 1 30); do
+        curl -s "$APP_URL/api/info" | jq -r .instance
+      done | sort -u | wc -l
+    )
+    elapsed=$(( $(date +%s) - started ))
+    echo "$label: ${elapsed}초, 응답 인스턴스 ${unique_instances}개"
+    if [ "$unique_instances" -ge 2 ]; then
+      printf -v "$result_var" '%s' "$elapsed"
+      break
+    fi
+    sleep 5
+  done
+
+  kill "$load_pid" 2>/dev/null || true
+  wait "$load_pid" 2>/dev/null || true
+}
+
+az webapp config appsettings set -g "$RG" -n "$APP" \
+  --settings STARTUP_DELAY_SECONDS=20 -o none
+
+for attempt in $(seq 1 18); do
+  curl -fsS "$APP_URL/health" >/dev/null && break
+  sleep 5
 done
-[ "$PREWARMED_INSTANCE_COUNT" -ge 2 ] ||
-  echo "[07] Prewarmed 메트릭 미확인 — 메트릭 적재 지연 가능"
-hey -z 120s -c 100 -q 10 "$APP_URL/api/info" > "$TMP_DIR/hey.out" &
-HEY_PID=$!
-sleep 90
-az webapp list-instances -g "$RG" -n "$APP" -o table
-INSTANCES=$(az webapp list-instances -g "$RG" -n "$APP" --query "length(@)" -o tsv)
-echo "[07] 부하 중 인스턴스 수: $INSTANCES (기대 ≥2)"
-wait "$HEY_PID" || true
-HEY_PID=""
-echo "[07] 부하 제거 — scale-in은 수 분 후 az webapp list-instances로 확인(KEEP=1 권장)"
+
+if ! curl -fsS "$APP_URL/health" >/dev/null; then
+  restore_prewarmed_demo
+  echo "[07] 시작 지연 준비 단계의 /health 확인이 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+  exit 1
+fi
+
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
+  -o none
+
+if ! wait_for_single_instance; then
+  restore_prewarmed_demo
+  echo "[07] 시험 A 기준 상태 복원에 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+  exit 1
+fi
+
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prime-0.out"
+measure_scale_out "Prewarmed=0" "$TMP_DIR/hey-burst-0.out" NO_PREWARM_SECONDS
+echo "Prewarmed=0: $NO_PREWARM_SECONDS"
+
+if ! wait_for_single_instance; then
+  restore_prewarmed_demo
+  echo "[07] 시험 B 시작 전 기준 상태 복원에 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+  exit 1
+fi
+
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  -o none
+
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prime-1.out"
+measure_scale_out "Prewarmed=1" "$TMP_DIR/hey-burst-1.out" PREWARM_SECONDS
+echo "Prewarmed=1: $PREWARM_SECONDS"
+
+if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "Prewarmed=0 : ${NO_PREWARM_SECONDS}초"
+  echo "Prewarmed=1 : ${PREWARM_SECONDS}초"
+  echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
+else
+  echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
+fi
+
+restore_prewarmed_demo
 
 echo "===== [08] 진단 설정 + KQL + App Insights ($(date +%T)) ====="
 WEBAPP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
