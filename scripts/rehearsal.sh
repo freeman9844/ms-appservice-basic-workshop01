@@ -105,6 +105,20 @@ export PATH="$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
   go install github.com/rakyll/hey@latest
   export PATH="$HOME/go/bin:$PATH"; }
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prewarmed.out"
+PREWARMED_INSTANCE_COUNT=0
+for attempt in $(seq 1 6); do
+  START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+  PREWARMED_INSTANCE_COUNT=$(az monitor metrics list \
+    --resource "$APP_ID" --metric InstanceCount --interval PT1M \
+    --aggregation Maximum --start-time "$START" -o json |
+    jq '[.value[0].timeseries[0].data[].maximum // empty] | max // 0 | floor')
+  echo "[07] Prewarmed 관찰 InstanceCount=$PREWARMED_INSTANCE_COUNT"
+  [ "$PREWARMED_INSTANCE_COUNT" -ge 2 ] && break
+  sleep 30
+done
+[ "$PREWARMED_INSTANCE_COUNT" -ge 2 ] ||
+  echo "[07] Prewarmed 메트릭 미확인 — 메트릭 적재 지연 가능"
 hey -z 120s -c 100 -q 10 "$APP_URL/api/info" > "$TMP_DIR/hey.out" &
 HEY_PID=$!
 sleep 90
