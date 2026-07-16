@@ -105,13 +105,13 @@ export PATH="$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
   go install github.com/rakyll/hey@latest
   export PATH="$HOME/go/bin:$PATH"; }
+PREWARM_OBSERVATION_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prewarmed.out"
 PREWARMED_INSTANCE_COUNT=0
 for attempt in $(seq 1 6); do
-  START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
   PREWARMED_INSTANCE_COUNT=$(az monitor metrics list \
     --resource "$APP_ID" --metric InstanceCount --interval PT1M \
-    --aggregation Maximum --start-time "$START" -o json |
+    --aggregation Maximum --start-time "$PREWARM_OBSERVATION_START" -o json |
     jq '[.value[0].timeseries[0].data[].maximum // empty] | max // 0 | floor')
   echo "[07] Prewarmed 관찰 InstanceCount=$PREWARMED_INSTANCE_COUNT"
   [ "$PREWARMED_INSTANCE_COUNT" -ge 2 ] && break

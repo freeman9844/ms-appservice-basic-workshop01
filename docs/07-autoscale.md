@@ -218,6 +218,7 @@ Time                  Instances
 🟢 **실행 — 60초간 낮은 트래픽 발생**
 
 ```bash
+PREWARM_OBSERVATION_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prewarmed.out
 ```
 
@@ -228,13 +229,12 @@ hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prewarmed.out
 ```bash
 LATEST_INSTANCE_COUNT=0
 for attempt in $(seq 1 6); do
-  START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
   LATEST_INSTANCE_COUNT=$(az monitor metrics list \
     --resource "$APP_ID" \
     --metric InstanceCount \
     --interval PT1M \
     --aggregation Maximum \
-    --start-time "$START" -o json |
+    --start-time "$PREWARM_OBSERVATION_START" -o json |
     jq '[.value[0].timeseries[0].data[].maximum // empty] | max // 0 | floor')
 
   echo "InstanceCount=$LATEST_INSTANCE_COUNT"
@@ -250,7 +250,7 @@ InstanceCount=1
 InstanceCount=2
 ```
 
-> 👁️ `InstanceCount`는 앱이 실행 중인 활성 인스턴스와 **할당된 Prewarmed 인스턴스**를 함께 집계합니다. 값이 `1`에서 `2`로 증가했다면 Always-ready 인스턴스가 요청을 처리하기 시작한 뒤 다음 확장을 위한 Prewarmed 버퍼 1개가 준비된 것입니다. 아직 버퍼 상태이므로 두 번째 인스턴스가 일반 요청을 처리한다는 의미는 아닙니다.
+> 👁️ `InstanceCount`는 앱이 실행 중인 활성 인스턴스와 **할당된 Prewarmed 인스턴스**를 함께 집계합니다. 낮은 트래픽 시작 시각 이후 값이 `1`에서 `2`로 증가했다면 Always-ready 인스턴스가 요청을 처리하기 시작한 뒤 다음 확장을 위한 Prewarmed 버퍼 1개가 준비된 것입니다. 아직 버퍼 상태이므로 두 번째 인스턴스가 일반 요청을 처리한다는 의미는 아닙니다.
 >
 > 메트릭 적재에는 지연이 있을 수 있습니다. 최대 3분 안에 `2`가 나타나지 않아도 Automatic scaling 설정이 잘못되었다고 단정하지 말고 트러블슈팅의 메트릭 확인 방법을 참고합니다.
 
