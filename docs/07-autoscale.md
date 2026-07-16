@@ -6,12 +6,13 @@
 
 ## 목표
 
-이 모듈에서는 Azure App Service **Automatic scaling**(탄력 스케일)을 활성화하고, `hey` 부하 도구로 인위적인 HTTP 트래픽을 발생시켜 인스턴스가 수평 확장(scale-out)되는 과정을 관찰한 뒤, 부하를 제거하여 축소(scale-in)까지 확인합니다.
+이 모듈에서는 Azure App Service **Automatic scaling**(탄력 스케일)을 활성화하고, `hey` 부하 도구로 같은 앱에 순차적인 HTTP A/B 시험을 실행해 `Prewarmed instances`가 scale-out 지연을 얼마나 줄이는지 관찰합니다. 이후 부하가 사라진 뒤 다시 단일 인스턴스로 축소(scale-in)되는 기준 상태까지 확인합니다.
 
 - App Service 플랜을 Elastic scale 모드로 전환하고 최대 5 인스턴스로 설정합니다.
-- `hey`로 120초 동안 HTTP 부하를 생성합니다.
-- `list-instances` 와 인스턴스별 응답 분포로 확장을 검증합니다.
-- 부하 종료 후 인스턴스가 1개로 축소됨을 확인합니다.
+- `STARTUP_DELAY_SECONDS=20`으로 앱 시작 지연을 의도적으로 키운 뒤, 같은 앱에서 `Prewarmed=0` 과 `Prewarmed=1`을 순차 비교합니다.
+- `InstanceCount` 메트릭으로 시험 전 단일 인스턴스 기준 상태를 확인합니다.
+- `/api/info` 응답의 실제 인스턴스 ID를 이용해 두 번째 인스턴스가 나타날 때까지 걸린 시간을 측정합니다.
+- 시험 사이와 종료 후 인스턴스가 다시 1개 기준 상태로 축소됨을 확인합니다.
 - **Automatic scaling** 방식과 **규칙 기반(Azure Monitor autoscale)** 방식의 개념 차이를 이해합니다.
 - **Always-ready instances**와 **Prewarmed instances**의 역할과 비용 차이를 이해합니다.
 - 모듈 종료 상태: **Automatic scaling 활성(Always ready 1·Prewarmed 1·Maximum burst 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
@@ -187,144 +188,263 @@ Usage: hey [options...] <url>
 
 ---
 
-## 3단계 — 낮은 트래픽으로 Prewarmed 할당 관찰
+## 3단계 — Prewarmed A/B 비교 준비
 
-Automatic scaling을 활성화한 직후 유휴 상태에서는 Always-ready 인스턴스 1개가 유지됩니다. 먼저 Azure Monitor의 `InstanceCount` 메트릭으로 기준값을 확인합니다.
+이번 모듈의 관찰 포인트는 “메트릭이 늘어났는가”가 아니라 **같은 앱에서 `Prewarmed=0` 과 `Prewarmed=1`이 실제 응답 인스턴스 분산 시점에 어떤 차이를 만드는가**입니다. 먼저 `STARTUP_DELAY_SECONDS=20`으로 새 인스턴스 시작 지연을 키우고, 재사용 가능한 헬퍼 함수로 두 시험을 같은 조건에서 실행합니다.
 
-🟢 **실행 — 유휴 기준값 확인**
-
-```bash
-START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
-az monitor metrics list \
-  --resource "$APP_ID" \
-  --metric InstanceCount \
-  --interval PT1M \
-  --aggregation Maximum \
-  --start-time "$START" \
-  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,instances:maximum}" \
-  -o table
-```
-
-📋 **예상 출력 — 유휴 상태**
-
-```
-Time                  Instances
---------------------  -----------
-2026-07-16T01:30:00Z  1.0
-```
-
-> 👁️ Azure Portal에서 이 메트릭은 **Automatic Scaling Instance Count**로 표시됩니다. 값 `1`은 현재 Always-ready 인스턴스만 할당되어 있음을 의미합니다.
-
-🟢 **실행 — 60초간 낮은 트래픽 발생**
+🟢 **실행 — 시작 지연 설정 및 앱 준비**
 
 ```bash
-PREWARM_OBSERVATION_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prewarmed.out
-```
+az webapp config appsettings set -g "$RG" -n "$APP" \
+  --settings STARTUP_DELAY_SECONDS=20 --output none
 
-> 👁️ 낮은 트래픽은 즉시 대규모 scale-out을 유도하기보다 Always-ready 인스턴스를 활성화하여 다음 확장에 대비한 Prewarmed 버퍼가 할당되는 흐름을 관찰하기 위한 것입니다.
-
-🟢 **실행 — 최대 3분 동안 Prewarmed 할당 확인**
-
-```bash
-LATEST_INSTANCE_COUNT=0
-for attempt in $(seq 1 6); do
-  LATEST_INSTANCE_COUNT=$(az monitor metrics list \
-    --resource "$APP_ID" \
-    --metric InstanceCount \
-    --interval PT1M \
-    --aggregation Maximum \
-    --start-time "$PREWARM_OBSERVATION_START" -o json |
-    jq '[.value[0].timeseries[0].data[].maximum // empty] | max // 0 | floor')
-
-  echo "InstanceCount=$LATEST_INSTANCE_COUNT"
-  [ "$LATEST_INSTANCE_COUNT" -ge 2 ] && break
-  sleep 30
+for attempt in $(seq 1 18); do
+  curl -fsS "$APP_URL/health" >/dev/null && break
+  sleep 5
 done
+curl -fsS "$APP_URL/health"
 ```
 
 📋 **예상 출력**
 
-```
-InstanceCount=1
-InstanceCount=2
+```json
+{"ok":true}
 ```
 
-> 👁️ `InstanceCount`는 앱이 실행 중인 활성 인스턴스와 **할당된 Prewarmed 인스턴스**를 함께 집계합니다. 낮은 트래픽 시작 시각 이후 값이 `1`에서 `2`로 증가했다면 Always-ready 인스턴스가 요청을 처리하기 시작한 뒤 다음 확장을 위한 Prewarmed 버퍼 1개가 준비된 것입니다. 아직 버퍼 상태이므로 두 번째 인스턴스가 일반 요청을 처리한다는 의미는 아닙니다.
+🟢 **실행 — 기준 상태 확인과 A/B 측정용 헬퍼 정의**
+
+```bash
+latest_instance_count() {
+  local start
+  start=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+  az monitor metrics list \
+    --resource "$APP_ID" --metric InstanceCount --interval PT1M \
+    --aggregation Maximum --start-time "$start" -o json |
+    jq '[.value[0].timeseries[0].data[].maximum // empty] | last // 0 | floor'
+}
+
+wait_for_single_instance() {
+  local count=0
+  for attempt in $(seq 1 20); do
+    count=$(latest_instance_count)
+    echo "InstanceCount=$count"
+    [ "$count" -le 1 ] && return 0
+    sleep 30
+  done
+  return 1
+}
+
+measure_scale_out() {
+  local label=$1
+  local output_file=$2
+  local result_var=$3
+  local started elapsed unique_instances
+
+  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
+  local load_pid=$!
+  started=$(date +%s)
+  printf -v "$result_var" '%s' timeout
+
+  for attempt in $(seq 1 36); do
+    unique_instances=$(
+      for i in $(seq 1 30); do
+        curl -s "$APP_URL/api/info" | jq -r .instance
+      done | sort -u | wc -l
+    )
+    elapsed=$(( $(date +%s) - started ))
+    echo "$label: ${elapsed}초, 응답 인스턴스 ${unique_instances}개"
+    if [ "$unique_instances" -ge 2 ]; then
+      printf -v "$result_var" '%s' "$elapsed"
+      break
+    fi
+    sleep 5
+  done
+
+  kill "$load_pid" 2>/dev/null || true
+  wait "$load_pid" 2>/dev/null || true
+}
+```
+
+> 👁️ 여기서 `InstanceCount` 메트릭은 **시험 시작 전 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 측정 결과는 `/api/info`가 돌려주는 **응답 인스턴스 ID가 2종류 이상으로 보이기까지 걸린 시간**입니다.
 >
-> 메트릭 적재에는 지연이 있을 수 있습니다. 최대 3분 안에 `2`가 나타나지 않아도 Automatic scaling 설정이 잘못되었다고 단정하지 말고 트러블슈팅의 메트릭 확인 방법을 참고합니다.
+> Azure Portal에서는 같은 메트릭을 **Automatic Scaling Instance Count**로 볼 수 있습니다. 값 `1`은 Always-ready 인스턴스만 남은 깨끗한 기준 상태를 뜻합니다.
 
 ---
 
-## 4단계 — 높은 부하로 Prewarmed 활성화 및 확장 관찰
+## 4단계 — 시험 A: Prewarmed=0
 
-🟢 **실행** — `hey`를 백그라운드로 실행하여 120초 동안 동시 100 연결로 HTTP 부하를 발생시킵니다.
+먼저 `Prewarmed`를 0으로 바꿔 워밍 버퍼 없이 scale-out이 얼마나 걸리는지 측정합니다.
 
-```bash
-hey -z 120s -c 100 -q 10 $APP_URL/api/info &
-```
-
-> 👁️ `-z 120s`는 지속 시간, `-c 100`은 동시 연결 수, `-q 10`은 초당 요청 상한, `&`는 백그라운드 실행입니다. 부하가 진행되는 동안 다음 명령으로 인스턴스 상태를 확인합니다.
-
-🟢 **실행** — 부하 시작 후 60–90초가 지난 뒤 인스턴스 목록을 조회합니다.
+🟢 **실행 — 시험 A 설정**
 
 ```bash
-# 부하 진행 중(60–90초 후) 인스턴스 확인
-az webapp list-instances -g $RG -n $APP -o table
-for i in $(seq 1 50); do curl -s $APP_URL/api/info | jq -r .instance; done | sort | uniq -c
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
+  --output none
 ```
 
-📋 **예상 출력** (`list-instances` — 2행 이상)
+🟢 **실행 — 시험 A 시작 전 단일 인스턴스 기준 상태 확인**
 
-```
-Name                                    State    StatusCode
---------------------------------------  -------  ------------
-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
-yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy    Ready    200
-```
-
-📋 **예상 출력** (인스턴스 분포 — 2종 이상)
-
-```
-     28 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-     22 yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
+```bash
+if ! wait_for_single_instance; then
+  echo "단일 인스턴스로 축소되지 않았습니다. 다음 시험 명령을 실행하지 마세요."
+fi
 ```
 
-> 👁️ 두 가지 인스턴스 ID가 혼합되어 나타나면 요청이 여러 활성 인스턴스로 분산되고 있음을 의미합니다. 3단계에서 준비된 Prewarmed 버퍼가 활성 인스턴스로 전환되어 요청 처리에 투입되고, 최대 확장 한도에 도달할 때까지 플랫폼이 다음 버퍼를 준비합니다. 메트릭 증가는 **할당**, 여러 instance ID는 **실제 요청 처리**를 각각 보여줍니다.
+> 👁️ 위 문구가 출력되면 **여기서 멈추고 더 진행하지 마세요.** Cloud Shell 세션을 종료할 필요는 없지만, scale-in이 끝나기 전에는 아래 시험 명령을 실행하면 안 됩니다.
+
+🟢 **실행 — 시험 A 부하 발생 및 측정**
+
+```bash
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prime-0.out
+measure_scale_out "Prewarmed=0" /tmp/hey-burst-0.out NO_PREWARM_SECONDS
+echo "Prewarmed=0: $NO_PREWARM_SECONDS"
+```
+
+📋 **예상 출력** (예시)
+
+```text
+InstanceCount=1
+Prewarmed=0: 48초, 응답 인스턴스 1개
+Prewarmed=0: 53초, 응답 인스턴스 2개
+Prewarmed=0: 53
+```
+
+> 👁️ 마지막 숫자는 “두 번째 인스턴스가 실제 응답에 등장할 때까지 걸린 시간(초)”입니다. 환경에 따라 `timeout`이 출력될 수도 있습니다.
 
 ---
 
-## 5단계 — 부하 제거 및 축소(scale-in) 관찰
+## 5단계 — scale-in 게이트 후 시험 B: Prewarmed=1
 
-> 👁️ **부하가 남아 있으면 플랫폼이 축소를 결정하지 않습니다.** 반드시 `wait`으로 `hey` 프로세스가 종료된 것을 확인한 뒤 대기합니다.
+시험 B는 반드시 시험 A의 인스턴스가 정리된 뒤 시작해야 합니다. 먼저 scale-in 게이트를 통과한 다음 원래 권장값인 `Prewarmed=1`로 같은 실험을 반복합니다.
 
-🟢 **실행**
+🟢 **실행 — 시험 B 시작 전 기준 상태 재확인**
 
 ```bash
-wait   # hey 종료 대기(-z 120s 경과)
-# 수 분 후
-az webapp list-instances -g $RG -n $APP -o table   # 1개로 축소
+if ! wait_for_single_instance; then
+  echo "시험 A의 인스턴스가 남아 있습니다. 시험 B 명령을 실행하지 마세요."
+fi
 ```
 
-📋 **예상 출력** (축소 완료 후)
+> 👁️ 위 문구가 출력되면 **여기서 멈추고 더 진행하지 마세요.** 시험 A 부하의 여파가 남아 있으면 공정한 비교가 되지 않습니다.
 
+🟢 **실행 — 시험 B 설정 및 측정**
+
+```bash
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none
+
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prime-1.out
+measure_scale_out "Prewarmed=1" /tmp/hey-burst-1.out PREWARM_SECONDS
+echo "Prewarmed=1: $PREWARM_SECONDS"
 ```
-Name                                    State    StatusCode
---------------------------------------  -------  ------------
-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
+
+📋 **예상 출력** (예시)
+
+```text
+InstanceCount=1
+Prewarmed=1: 19초, 응답 인스턴스 1개
+Prewarmed=1: 24초, 응답 인스턴스 2개
+Prewarmed=1: 24
 ```
 
-> 👁️ 축소는 확장보다 느립니다. 공식 동작 기준으로 플랫폼은 부하 증가가 멈춘 뒤 약 5–10분부터 축소 가능성을 검토하며, 인스턴스를 점진적으로 회수합니다. 환경에 따라 더 오래 걸릴 수 있습니다.
+> 👁️ 두 시험 모두 같은 앱·같은 엔드포인트·같은 부하 함수를 쓰므로, 비교 대상은 `Prewarmed` 설정 차이뿐입니다.
 
-> 👁️ 앱에는 CPU를 실제로 소모하는 `/load?sec=N` 엔드포인트도 있습니다(`hey -z 60s -c 20 $APP_URL/load?sec=1` 등). HTTP 부하 외에 CPU 기반 부하를 실험하고 싶을 때 활용하십시오.
+---
+
+## 6단계 — 결과 해석 및 정리
+
+두 값이 모두 숫자라면 시간 차이를 계산합니다. 단, 아래 출력은 **설명용 예시**일 뿐이며 실제 수치는 환경, 플랫폼 판단 시점, 직전 부하 이력에 따라 달라질 수 있습니다.
+
+🟢 **실행 — 결과 비교**
+
+```bash
+if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "Prewarmed=0 : ${NO_PREWARM_SECONDS}초"
+  echo "Prewarmed=1 : ${PREWARM_SECONDS}초"
+  echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
+else
+  echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
+fi
+```
+
+📋 **예상 출력** (예시)
+
+```text
+Prewarmed=0 : 53초
+Prewarmed=1 : 24초
+개선         : 29초
+```
+
+🟢 **실행 — 모듈 기본 상태로 복원**
+
+```bash
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none
+az webapp config appsettings delete -g "$RG" -n "$APP" \
+  --setting-names STARTUP_DELAY_SECONDS --output none
+```
+
+> 👁️ 정리 후 모듈 종료 상태는 다시 **Always ready 1 · Prewarmed 1 · Maximum burst 5**이며, `STARTUP_DELAY_SECONDS`도 제거되어 다음 모듈에 실험용 지연이 남지 않습니다.
 
 ---
 
 ## 검증
 
-### Prewarmed 할당 확인
+### A/B 비교 결과 확인
 
 🟢 **실행**
+
+```bash
+echo "NO_PREWARM_SECONDS=${NO_PREWARM_SECONDS:-unset}"
+echo "PREWARM_SECONDS=${PREWARM_SECONDS:-unset}"
+```
+
+- 두 값이 모두 숫자면 두 시험이 끝까지 수행된 것입니다.
+- `PREWARM_SECONDS`가 더 작으면 이번 실행에서는 `Prewarmed=1`이 더 빨리 두 번째 인스턴스를 실응답에 투입한 것입니다.
+- 한쪽이 `timeout`이어도 실패로 단정하지 말고 트러블슈팅을 참고해 다시 시도합니다.
+
+### 정리 상태 확인
+
+🟢 **실행**
+
+```bash
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+
+az webapp config appsettings list -g "$RG" -n "$APP" \
+  --query "[?name=='STARTUP_DELAY_SECONDS']"
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "alwaysReady": 1,
+  "prewarmed": 1
+}
+[]
+```
+
+또한 `wait_for_single_instance`를 다시 실행했을 때 최종적으로 `InstanceCount=1`이 나오면 다음 모듈로 넘어갈 준비가 된 것입니다.
+
+---
+
+## 트러블슈팅
+
+### (1) 한 시험이 `timeout`됨
+
+`measure_scale_out`은 180초 동안 두 번째 인스턴스가 실제 응답에 나타나지 않으면 `timeout`을 기록합니다. 한 번의 `timeout`만으로 Automatic scaling이 실패했다고 단정하지 말고 다음을 점검합니다.
+
+- `STARTUP_DELAY_SECONDS=20`이 적용된 뒤 앱이 `/health`에 정상 응답했는지 확인합니다.
+- `hey -z 180s -c 100 -q 10` 부하가 너무 약하면 같은 명령을 다시 한 번 수행해 비교합니다.
+- Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 확인합니다.
 
 ```bash
 START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
@@ -338,78 +458,29 @@ az monitor metrics list \
   -o table
 ```
 
-- `1`: 현재 Always-ready 인스턴스만 할당된 상태입니다.
-- `2` 이상: 활성 인스턴스와 할당된 Prewarmed 버퍼가 함께 포함된 상태입니다.
-- 출력 없음: 메트릭 적재를 위해 30–60초 기다린 후 다시 조회합니다.
+### (2) 단일 인스턴스로 축소되지 않음
 
-Portal에서는 Web App의 **Monitoring > Metrics**에서 **Automatic Scaling Instance Count** 메트릭을 선택하여 같은 값을 확인할 수 있습니다.
-
-### 확장(scale-out) 확인
-
-🟢 **실행**
+시험 A 뒤 `wait_for_single_instance`가 계속 실패하면 시험 B를 실행하지 말고 먼저 scale-in이 끝날 때까지 기다립니다. Cloud Shell을 종료할 필요는 없지만, 기준 상태가 복구되기 전에는 다음 코드 블록으로 넘어가면 안 됩니다.
 
 ```bash
-az webapp list-instances -g $RG -n $APP -o table
+for attempt in $(seq 1 5); do
+  latest_instance_count
+  sleep 60
+done
 ```
 
-📋 **예상 출력** (부하 중 — 2행 이상)
+Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Plan의 다른 앱이 추가 인스턴스를 붙잡고 있어도 지표가 늦게 내려갈 수 있습니다. 공식 동작 기준으로 축소 판단은 보통 부하 종료 후 5–10분 이후부터 시작되므로, 충분히 기다린 뒤 다시 측정합니다.
 
-```
-Name                                    State    StatusCode
---------------------------------------  -------  ------------
-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
-yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy    Ready    200
-```
+### (3) `Prewarmed=1`이 더 빠르지 않음
 
-### 축소(scale-in) 확인
+이 실험은 공유 플랫폼 위에서 실행되므로 매번 같은 숫자가 나오지 않습니다. `Prewarmed=1`이 항상 더 빠르다는 보장은 없으며, 다음 요인이 결과를 흔들 수 있습니다.
 
-🟢 **실행** (부하 제거 후 수 분 대기)
+- 직전 시험의 scale-in이 완전히 끝나지 않음
+- Azure Monitor 메트릭 적재 지연
+- 플랫폼의 내부 배치/할당 타이밍
+- 네트워크 지연과 `hey`/`curl` 샘플링 오차
 
-```bash
-az webapp list-instances -g $RG -n $APP -o table
-```
-
-📋 **예상 출력** (축소 완료 후)
-
-```
-Name                                    State    StatusCode
---------------------------------------  -------  ------------
-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
-```
-
-낮은 트래픽 후 `InstanceCount` 증가를 관찰하고, 높은 부하 중 인스턴스가 2개 이상으로 확장되었다가 부하 제거 후 1개로 축소되면 07 모듈이 완료된 것입니다.
-
----
-
-## 트러블슈팅
-
-### (1) 확장이 일어나지 않음
-
-`-c` 값을 높여 동시 연결 수를 늘려 보십시오(예: `-c 200`). 또한 플랜에 Elastic scale이 정상 활성화되었는지 확인합니다.
-
-```bash
-az appservice plan show -g $RG -n $PLAN --query "properties.elasticScaleEnabled" -o tsv
-```
-
-값이 `true`가 아닌 경우 1단계 명령을 재실행합니다.
-
-### (2) 축소가 일어나지 않음
-
-백그라운드에 `hey` 프로세스가 잔존하는 경우 플랫폼이 부하가 지속된다고 판단하여 축소하지 않습니다. `jobs` 명령으로 잔존 프로세스를 확인하고 종료합니다.
-
-```bash
-jobs
-# 잔존 프로세스가 있으면
-kill %1
-```
-
-Always-ready 값이 1보다 크면 해당 수 아래로는 축소되지 않습니다. 또한 같은 Plan에 여러 앱이 있으면 Plan은 앱별 Always-ready 요구사항 가운데 가장 높은 값과 기존 할당 인스턴스를 고려하므로, 현재 앱의 설정값보다 Plan 인스턴스 수가 많아 보일 수 있습니다.
-
-### (3) `InstanceCount`가 1에서 증가하지 않음
-
-낮은 트래픽의 크기, 플랫폼 판단 시점, Azure Monitor 적재 지연에 따라 최대 3분 동안 값이 `1`로 유지될 수 있습니다. 이는 Prewarmed 기능이 실패했다는 확정 증거가 아닙니다.
-
-1단계에서 `prewarmed` 값이 `1`인지 다시 확인하고, 30–60초 후 메트릭을 재조회합니다. Portal에서는 Web App의 **Monitoring > Metrics > Automatic Scaling Instance Count**를 확인합니다. 높은 부하 단계에서 여러 instance ID가 관찰되면 scale-out 자체는 정상 동작한 것입니다.
+같은 절차를 한 번 더 반복해 경향을 비교하고, 두 시험 모두에서 `/api/info`의 인스턴스 ID가 결국 2종 이상 나타나는지 함께 확인합니다.
 
 ### (4) hey 설치 실패
 
