@@ -220,18 +220,38 @@ latest_instance_count() {
   az monitor metrics list \
     --resource "$APP_ID" --metric InstanceCount --interval PT1M \
     --aggregation Maximum --start-time "$start" -o json |
-    jq '[.value[0].timeseries[0].data[].maximum // empty] | last // 0 | floor'
+    jq -er '
+      [.value[0].timeseries[0].data[].maximum // empty]
+      | if length == 0 then
+          error("InstanceCount metric unavailable")
+        else
+          last | floor
+        end
+    '
 }
 
 wait_for_single_instance() {
-  local count=0
+  local count
   for attempt in $(seq 1 20); do
-    count=$(latest_instance_count)
+    if ! count=$(latest_instance_count 2>/dev/null); then
+      echo "InstanceCount=missing"
+      sleep 30
+      continue
+    fi
     echo "InstanceCount=$count"
-    [ "$count" -le 1 ] && return 0
+    [ "$count" -eq 1 ] && return 0
     sleep 30
   done
   return 1
+}
+
+restore_autoscale_defaults() {
+  az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+    --output none
+  az webapp config appsettings delete -g "$RG" -n "$APP" \
+    --setting-names STARTUP_DELAY_SECONDS --output none
 }
 
 measure_scale_out() {
@@ -267,7 +287,7 @@ measure_scale_out() {
 
 > 👁️ 여기서 `InstanceCount` 메트릭은 **시험 시작 전 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 측정 결과는 `/api/info`가 돌려주는 **응답 인스턴스 ID가 2종류 이상으로 보이기까지 걸린 시간**입니다.
 >
-> Azure Portal에서는 같은 메트릭을 **Automatic Scaling Instance Count**로 볼 수 있습니다. 값 `1`은 Always-ready 인스턴스만 남은 깨끗한 기준 상태를 뜻합니다.
+> `wait_for_single_instance`는 메트릭 공백을 `InstanceCount=missing`으로 취급하며, **실제 메트릭 값이 정확히 `1`일 때만** 기준 상태로 인정합니다. Azure Portal에서는 같은 메트릭을 **Automatic Scaling Instance Count**로 볼 수 있습니다.
 
 ---
 
@@ -288,11 +308,12 @@ az rest --method patch \
 
 ```bash
 if ! wait_for_single_instance; then
-  echo "단일 인스턴스로 축소되지 않았습니다. 다음 시험 명령을 실행하지 마세요."
+  restore_autoscale_defaults
+  echo "기준 상태 복원을 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
 fi
 ```
 
-> 👁️ 위 문구가 출력되면 **여기서 멈추고 더 진행하지 마세요.** Cloud Shell 세션을 종료할 필요는 없지만, scale-in이 끝나기 전에는 아래 시험 명령을 실행하면 안 됩니다.
+> 👁️ 위 문구가 출력되면 복원 helper가 이미 **Prewarmed=1 복구 + `STARTUP_DELAY_SECONDS` 삭제**를 수행한 상태입니다. Cloud Shell 세션은 그대로 두고 여기서 멈춘 뒤, 재시도할 때만 3단계부터 다시 시작하세요.
 
 🟢 **실행 — 시험 A 부하 발생 및 측정**
 
@@ -323,11 +344,12 @@ Prewarmed=0: 53
 
 ```bash
 if ! wait_for_single_instance; then
-  echo "시험 A의 인스턴스가 남아 있습니다. 시험 B 명령을 실행하지 마세요."
+  restore_autoscale_defaults
+  echo "기준 상태 복원을 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 시험 B 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
 fi
 ```
 
-> 👁️ 위 문구가 출력되면 **여기서 멈추고 더 진행하지 마세요.** 시험 A 부하의 여파가 남아 있으면 공정한 비교가 되지 않습니다.
+> 👁️ 위 문구가 출력되면 복원 helper가 이미 **Prewarmed=1 복구 + `STARTUP_DELAY_SECONDS` 삭제**를 수행한 상태입니다. Cloud Shell 세션은 그대로 두고 여기서 멈춘 뒤, 다음 재시도는 3단계부터 다시 시작하세요.
 
 🟢 **실행 — 시험 B 설정 및 측정**
 
@@ -382,12 +404,7 @@ Prewarmed=1 : 24초
 🟢 **실행 — 모듈 기본 상태로 복원**
 
 ```bash
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none
-az webapp config appsettings delete -g "$RG" -n "$APP" \
-  --setting-names STARTUP_DELAY_SECONDS --output none
+restore_autoscale_defaults
 ```
 
 > 👁️ 정리 후 모듈 종료 상태는 다시 **Always ready 1 · Prewarmed 1 · Maximum burst 5**이며, `STARTUP_DELAY_SECONDS`도 제거되어 다음 모듈에 실험용 지연이 남지 않습니다.
@@ -460,7 +477,7 @@ az monitor metrics list \
 
 ### (2) 단일 인스턴스로 축소되지 않음
 
-시험 A 뒤 `wait_for_single_instance`가 계속 실패하면 시험 B를 실행하지 말고 먼저 scale-in이 끝날 때까지 기다립니다. Cloud Shell을 종료할 필요는 없지만, 기준 상태가 복구되기 전에는 다음 코드 블록으로 넘어가면 안 됩니다.
+시험 A 뒤 `wait_for_single_instance`가 계속 실패하면 시험 B를 실행하지 말고, 앞선 게이트 블록이 복원 helper로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추도록 되어 있습니다. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 3단계부터 재실행하세요.
 
 ```bash
 for attempt in $(seq 1 5); do
