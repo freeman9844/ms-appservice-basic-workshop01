@@ -187,7 +187,76 @@ Usage: hey [options...] <url>
 
 ---
 
-## 3단계 — 부하 생성 및 확장(scale-out) 관찰
+## 3단계 — 낮은 트래픽으로 Prewarmed 할당 관찰
+
+Automatic scaling을 활성화한 직후 유휴 상태에서는 Always-ready 인스턴스 1개가 유지됩니다. 먼저 Azure Monitor의 `InstanceCount` 메트릭으로 기준값을 확인합니다.
+
+🟢 **실행 — 유휴 기준값 확인**
+
+```bash
+START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+az monitor metrics list \
+  --resource "$APP_ID" \
+  --metric InstanceCount \
+  --interval PT1M \
+  --aggregation Maximum \
+  --start-time "$START" \
+  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,instances:maximum}" \
+  -o table
+```
+
+📋 **예상 출력 — 유휴 상태**
+
+```
+Time                  Instances
+--------------------  -----------
+2026-07-16T01:30:00Z  1.0
+```
+
+> 👁️ Azure Portal에서 이 메트릭은 **Automatic Scaling Instance Count**로 표시됩니다. 값 `1`은 현재 Always-ready 인스턴스만 할당되어 있음을 의미합니다.
+
+🟢 **실행 — 60초간 낮은 트래픽 발생**
+
+```bash
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prewarmed.out
+```
+
+> 👁️ 낮은 트래픽은 즉시 대규모 scale-out을 유도하기보다 Always-ready 인스턴스를 활성화하여 다음 확장에 대비한 Prewarmed 버퍼가 할당되는 흐름을 관찰하기 위한 것입니다.
+
+🟢 **실행 — 최대 3분 동안 Prewarmed 할당 확인**
+
+```bash
+LATEST_INSTANCE_COUNT=0
+for attempt in $(seq 1 6); do
+  START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+  LATEST_INSTANCE_COUNT=$(az monitor metrics list \
+    --resource "$APP_ID" \
+    --metric InstanceCount \
+    --interval PT1M \
+    --aggregation Maximum \
+    --start-time "$START" -o json |
+    jq '[.value[0].timeseries[0].data[].maximum // empty] | max // 0 | floor')
+
+  echo "InstanceCount=$LATEST_INSTANCE_COUNT"
+  [ "$LATEST_INSTANCE_COUNT" -ge 2 ] && break
+  sleep 30
+done
+```
+
+📋 **예상 출력**
+
+```
+InstanceCount=1
+InstanceCount=2
+```
+
+> 👁️ `InstanceCount`는 앱이 실행 중인 활성 인스턴스와 **할당된 Prewarmed 인스턴스**를 함께 집계합니다. 값이 `1`에서 `2`로 증가했다면 Always-ready 인스턴스가 요청을 처리하기 시작한 뒤 다음 확장을 위한 Prewarmed 버퍼 1개가 준비된 것입니다. 아직 버퍼 상태이므로 두 번째 인스턴스가 일반 요청을 처리한다는 의미는 아닙니다.
+>
+> 메트릭 적재에는 지연이 있을 수 있습니다. 최대 3분 안에 `2`가 나타나지 않아도 Automatic scaling 설정이 잘못되었다고 단정하지 말고 트러블슈팅의 메트릭 확인 방법을 참고합니다.
+
+---
+
+## 4단계 — 높은 부하로 Prewarmed 활성화 및 확장 관찰
 
 🟢 **실행** — `hey`를 백그라운드로 실행하여 120초 동안 동시 100 연결로 HTTP 부하를 발생시킵니다.
 
@@ -221,11 +290,11 @@ yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy    Ready    200
      22 yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
 ```
 
-> 👁️ 두 가지 인스턴스 ID가 혼합되어 나타나면 요청이 여러 인스턴스로 분산되고 있음을 의미합니다. 플랫폼이 HTTP 부하를 감지하여 인스턴스를 추가로 투입한 결과입니다.
+> 👁️ 두 가지 인스턴스 ID가 혼합되어 나타나면 요청이 여러 활성 인스턴스로 분산되고 있음을 의미합니다. 3단계에서 준비된 Prewarmed 버퍼가 활성 인스턴스로 전환되어 요청 처리에 투입되고, 최대 확장 한도에 도달할 때까지 플랫폼이 다음 버퍼를 준비합니다. 메트릭 증가는 **할당**, 여러 instance ID는 **실제 요청 처리**를 각각 보여줍니다.
 
 ---
 
-## 4단계 — 부하 제거 및 축소(scale-in) 관찰
+## 5단계 — 부하 제거 및 축소(scale-in) 관찰
 
 > 👁️ **부하가 남아 있으면 플랫폼이 축소를 결정하지 않습니다.** 반드시 `wait`으로 `hey` 프로세스가 종료된 것을 확인한 뒤 대기합니다.
 
@@ -252,6 +321,28 @@ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
 ---
 
 ## 검증
+
+### Prewarmed 할당 확인
+
+🟢 **실행**
+
+```bash
+START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+az monitor metrics list \
+  --resource "$APP_ID" \
+  --metric InstanceCount \
+  --interval PT1M \
+  --aggregation Maximum \
+  --start-time "$START" \
+  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,instances:maximum}" \
+  -o table
+```
+
+- `1`: 현재 Always-ready 인스턴스만 할당된 상태입니다.
+- `2` 이상: 활성 인스턴스와 할당된 Prewarmed 버퍼가 함께 포함된 상태입니다.
+- 출력 없음: 메트릭 적재를 위해 30–60초 기다린 후 다시 조회합니다.
+
+Portal에서는 Web App의 **Monitoring > Metrics**에서 **Automatic Scaling Instance Count** 메트릭을 선택하여 같은 값을 확인할 수 있습니다.
 
 ### 확장(scale-out) 확인
 
@@ -286,7 +377,7 @@ Name                                    State    StatusCode
 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx    Ready    200
 ```
 
-부하 중 인스턴스가 2개 이상으로 확장되었다가, 부하 제거 후 1개로 축소되면 07 모듈이 완료된 것입니다.
+낮은 트래픽 후 `InstanceCount` 증가를 관찰하고, 높은 부하 중 인스턴스가 2개 이상으로 확장되었다가 부하 제거 후 1개로 축소되면 07 모듈이 완료된 것입니다.
 
 ---
 
@@ -314,7 +405,13 @@ kill %1
 
 Always-ready 값이 1보다 크면 해당 수 아래로는 축소되지 않습니다. 또한 같은 Plan에 여러 앱이 있으면 Plan은 앱별 Always-ready 요구사항 가운데 가장 높은 값과 기존 할당 인스턴스를 고려하므로, 현재 앱의 설정값보다 Plan 인스턴스 수가 많아 보일 수 있습니다.
 
-### (3) hey 설치 실패
+### (3) `InstanceCount`가 1에서 증가하지 않음
+
+낮은 트래픽의 크기, 플랫폼 판단 시점, Azure Monitor 적재 지연에 따라 최대 3분 동안 값이 `1`로 유지될 수 있습니다. 이는 Prewarmed 기능이 실패했다는 확정 증거가 아닙니다.
+
+1단계에서 `prewarmed` 값이 `1`인지 다시 확인하고, 30–60초 후 메트릭을 재조회합니다. Portal에서는 Web App의 **Monitoring > Metrics > Automatic Scaling Instance Count**를 확인합니다. 높은 부하 단계에서 여러 instance ID가 관찰되면 scale-out 자체는 정상 동작한 것입니다.
+
+### (4) hey 설치 실패
 
 `go install`은 GitHub에서 소스를 받아 빌드하므로 네트워크 일시 장애일 수 있습니다. 잠시 후 재시도하고, PATH에 `$HOME/go/bin`이 포함되어 있는지 확인합니다.
 
@@ -324,7 +421,7 @@ export PATH=$HOME/go/bin:$PATH
 command -v hey
 ```
 
-### (4) Premium V2/V3 SKU만 지원한다는 오류
+### (5) Premium V2/V3 SKU만 지원한다는 오류
 
 ```text
 --number-of-workers and --elastic-scale can only be used on premium V2/V3 or workflow SKUs.
