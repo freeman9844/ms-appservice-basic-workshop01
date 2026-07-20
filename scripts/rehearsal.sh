@@ -250,7 +250,7 @@ measure_scale_out() {
   local label=$1
   local output_file=$2
   local result_var=$3
-  local started elapsed unique_instances deadline
+  local started elapsed unique_instances deadline now remaining curl_timeout instance_id
 
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
   HEY_PID=$!
@@ -262,9 +262,19 @@ measure_scale_out() {
     [ "$(date +%s)" -lt "$deadline" ] || break
     unique_instances=$(
       for i in $(seq 1 30); do
-        curl --fail --silent --show-error --max-time 5 "$APP_URL/api/info" 2>/dev/null |
+        now=$(date +%s)
+        remaining=$((deadline - now))
+        [ "$remaining" -gt 0 ] || break
+        curl_timeout=5
+        [ "$remaining" -lt "$curl_timeout" ] && curl_timeout=$remaining
+        instance_id=$(
+          curl --fail --silent --show-error --max-time "$curl_timeout" "$APP_URL/api/info" 2>/dev/null |
           jq -er 'if ((.instance? | type) == "string" and (.instance | length) > 0) then .instance else empty end' 2>/dev/null ||
           true
+        )
+        now=$(date +%s)
+        [ "$now" -lt "$deadline" ] || break
+        [ -n "$instance_id" ] && printf '%s\n' "$instance_id"
       done | sort -u | awk 'length($0) > 0' | wc -l
     )
     elapsed=$(( $(date +%s) - started ))
