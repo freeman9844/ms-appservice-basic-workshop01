@@ -335,7 +335,9 @@ measure_scale_out() {
         )
         now=$(date +%s)
         [ "$now" -lt "$deadline" ] || break
-        [ -n "$instance_id" ] && printf '%s\n' "$instance_id"
+        if [ -n "$instance_id" ]; then
+          printf '%s\n' "$instance_id"
+        fi
       done | sort -u | awk 'length($0) > 0' | wc -l
     )
     elapsed=$(( $(date +%s) - started ))
@@ -364,14 +366,7 @@ measure_scale_out() {
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 --output none
 
-for attempt in $(seq 1 18); do
-  curl -fsS "$APP_URL/health" >/dev/null && break
-  sleep 5
-done
-
-if curl -fsS "$APP_URL/health"; then
-  :
-else
+if ! wait_for_health; then
   if ! restore_autoscale_defaults; then
     echo "시작 지연 준비 단계의 복원에 실패했습니다." >&2
   fi
