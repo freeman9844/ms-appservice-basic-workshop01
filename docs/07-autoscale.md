@@ -271,6 +271,20 @@ wait_for_health() {
   return 1
 }
 
+prepare_startup_delay() {
+  az webapp config appsettings set -g "$RG" -n "$APP" \
+    --settings STARTUP_DELAY_SECONDS=20 --output none
+
+  if ! wait_for_health; then
+    if ! restore_autoscale_defaults; then
+      echo "시작 지연 준비 단계의 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
+      return 1
+    fi
+    echo "시작 지연 준비 단계의 /health 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
+    return 1
+  fi
+}
+
 restore_autoscale_defaults() {
   local status=0 settings startup_count
   if ! az rest --method patch \
@@ -363,22 +377,15 @@ measure_scale_out() {
 🟢 **실행 — 시작 지연 설정 및 앱 준비**
 
 ```bash
-az webapp config appsettings set -g "$RG" -n "$APP" \
-  --settings STARTUP_DELAY_SECONDS=20 --output none
-
-if ! wait_for_health; then
-  if ! restore_autoscale_defaults; then
-    echo "시작 지연 준비 단계의 복원에 실패했습니다." >&2
-  fi
-  echo "시작 지연 준비 단계의 /health 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제를 마쳤으니 Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
-  exit 1
-fi
+prepare_startup_delay
 ```
+
+> 👁️ `wait_for_health`는 `/health` 응답을 화면에 출력하지 않지만, 실제 본문은 `{"status":"ok"}`입니다.
 
 📋 **예상 출력**
 
 ```json
-{"ok":true}
+{"status":"ok"}
 ```
 
 ---
@@ -387,45 +394,41 @@ fi
 
 먼저 `Prewarmed`를 0으로 바꿔 워밍 버퍼 없이 scale-out이 얼마나 걸리는지 측정합니다.
 
-🟢 **실행 — 시험 A 설정**
+🟢 **실행 — 시험 A 설정과 측정**
 
 ```bash
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
-  --output none
-A_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-```
+run_trial_a() {
+  az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
+    --output none
+  A_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-🟢 **실행 — 시험 A 시작 전 단일 인스턴스 기준 상태 확인**
-
-```bash
-if ! wait_for_single_instance "$A_TRANSITION_AT"; then
-  if ! restore_autoscale_defaults; then
-    echo "시험 A 기준 상태 복원에 실패했습니다." >&2
+  if ! wait_for_single_instance "$A_TRANSITION_AT"; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 A 기준 상태 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
+      return 1
+    fi
+    echo "시험 A 시작 전 단일 인스턴스 기준 상태 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요."
+    return 1
   fi
-  echo "기준 상태 복원을 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
-  exit 1
-fi
-```
 
-> 👁️ 위 문구가 출력되면 복원 helper가 이미 **Prewarmed=1 복구 + `STARTUP_DELAY_SECONDS` 삭제**를 수행한 상태입니다. Cloud Shell 세션은 그대로 두고 여기서 멈춘 뒤, 재시도할 때만 3단계부터 다시 시작하세요.
-
-🟢 **실행 — 시험 A 부하 발생 및 측정**
-
-```bash
-AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
-mkdir -p "$AB_DIR"
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-0.out"
-measure_scale_out "Prewarmed=0" "$AB_DIR/hey-burst-0.out" NO_PREWARM_SECONDS
-echo "Prewarmed=0: $NO_PREWARM_SECONDS"
-if [[ ! "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
-  if ! restore_autoscale_defaults; then
-    echo "시험 A timeout 후 복원에 실패했습니다." >&2
+  AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
+  mkdir -p "$AB_DIR"
+  hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-0.out"
+  measure_scale_out "Prewarmed=0" "$AB_DIR/hey-burst-0.out" NO_PREWARM_SECONDS
+  echo "Prewarmed=0: $NO_PREWARM_SECONDS"
+  if [[ ! "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 A timeout 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 실행하지 마세요." >&2
+      return 1
+    fi
+    echo "시험 A가 timeout되어 시험 B를 실행하지 않습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요."
+    return 1
   fi
-  echo "시험 A가 timeout되어 시험 B를 실행하지 않습니다." >&2
-  exit 1
-fi
+}
+
+run_trial_a
 ```
 
 📋 **예상 출력** (예시)
@@ -445,40 +448,40 @@ Prewarmed=0: 53
 
 시험 B는 반드시 시험 A의 인스턴스가 정리된 뒤 시작해야 합니다. 먼저 scale-in 게이트를 통과한 다음 원래 권장값인 `Prewarmed=1`로 같은 실험을 반복합니다.
 
-🟢 **실행 — 시험 B 시작 전 기준 상태 재확인**
+🟢 **실행 — 시험 B 시작 전 기준 상태 재확인과 측정**
 
 ```bash
-SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
-  if ! restore_autoscale_defaults; then
-    echo "시험 A 후 복원에 실패했습니다." >&2
+run_trial_b() {
+  SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 A 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 시작하지 마세요." >&2
+      return 1
+    fi
+    echo "시험 B 시작 전 기준 상태 재확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요."
+    return 1
   fi
-  echo "기준 상태 복원을 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 시험 B 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
-  exit 1
-fi
-```
 
-> 👁️ 위 문구가 출력되면 복원 helper가 이미 **Prewarmed=1 복구 + `STARTUP_DELAY_SECONDS` 삭제**를 수행한 상태입니다. Cloud Shell 세션은 그대로 두고 여기서 멈춘 뒤, 다음 재시도는 3단계부터 다시 시작하세요.
+  az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+    --output none
+  B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-🟢 **실행 — 시험 B 설정 및 측정**
-
-```bash
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none
-B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-1.out"
-if ! wait_for_buffer_allocation "$B_TRANSITION_AT"; then
-  if ! restore_autoscale_defaults; then
-    echo "시험 B Prewarmed 버퍼 확인 후 복원에 실패했습니다." >&2
+  hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-1.out"
+  if ! wait_for_buffer_allocation "$B_TRANSITION_AT"; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 B Prewarmed 버퍼 확인 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 이 시험을 다시 시작하지 마세요." >&2
+      return 1
+    fi
+    echo "시험 B에서 설정 변경 후 신선한 InstanceCount>=2 버퍼 할당 신호를 확인하지 못했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요."
+    return 1
   fi
-  echo "시험 B에서 설정 변경 후 신선한 InstanceCount>=2 버퍼 할당 신호를 확인하지 못했습니다." >&2
-  exit 1
-fi
-measure_scale_out "Prewarmed=1" "$AB_DIR/hey-burst-1.out" PREWARM_SECONDS
-echo "Prewarmed=1: $PREWARM_SECONDS"
+  measure_scale_out "Prewarmed=1" "$AB_DIR/hey-burst-1.out" PREWARM_SECONDS
+  echo "Prewarmed=1: $PREWARM_SECONDS"
+}
+
+run_trial_b
 ```
 
 📋 **예상 출력** (예시)
@@ -501,17 +504,23 @@ Prewarmed=1: 24
 🟢 **실행 — 결과 비교**
 
 ```bash
-if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
-  echo "Prewarmed=0 : ${NO_PREWARM_SECONDS}초"
-  echo "Prewarmed=1 : ${PREWARM_SECONDS}초"
-  echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
-else
-  echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
-  if ! restore_autoscale_defaults; then
-    echo "timeout 후 복원에 실패했습니다." >&2
+compare_results() {
+  if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "Prewarmed=0 : ${NO_PREWARM_SECONDS}초"
+    echo "Prewarmed=1 : ${PREWARM_SECONDS}초"
+    echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
+  else
+    echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
+    if ! restore_autoscale_defaults; then
+      echo "timeout 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 다음 모듈로 진행하지 마세요." >&2
+      return 1
+    fi
+    echo "timeout 상태를 확인했지만 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요."
+    return 1
   fi
-  exit 1
-fi
+}
+
+compare_results
 ```
 
 📋 **예상 출력** (예시)
@@ -525,10 +534,14 @@ Prewarmed=1 : 24초
 🟢 **실행 — 모듈 기본 상태로 복원**
 
 ```bash
-if ! restore_autoscale_defaults; then
-  echo "복원에 실패했습니다. 설정과 /health를 다시 확인한 뒤 다음 모듈로 진행하지 마세요." >&2
-  exit 1
-fi
+restore_module_defaults() {
+  if ! restore_autoscale_defaults; then
+    echo "복원에 실패했습니다. 설정과 /health를 다시 확인한 뒤 다음 모듈로 진행하지 마세요." >&2
+    return 1
+  fi
+}
+
+restore_module_defaults
 ```
 
 > 👁️ 정리 후 모듈 종료 상태는 다시 **Always ready 1 · Prewarmed 1 · Maximum burst 5**이며, `STARTUP_DELAY_SECONDS`도 제거되어 다음 모듈에 실험용 지연이 남지 않습니다.
