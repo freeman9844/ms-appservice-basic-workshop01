@@ -10,22 +10,39 @@ APP="app-appsvcworkshop-$SUFFIX"
 LAW="log-appsvcworkshop-$SUFFIX"
 APPI="appi-appsvcworkshop-$SUFFIX"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TMP_DIR=$(mktemp -d)
+TMP_DIR="$REPO_DIR/.rehearsal-tmp-$$"
+mkdir -p "$TMP_DIR"
 CLIENT_ID=""
 APP_ID=""
 HEY_PID=""
 PREWARMED_RESTORE_NEEDED=0
+CLEANUP_RUNNING=0
 
 cleanup() {
+  local exit_code=$?
+  local cleanup_status=0
+  if [ "$CLEANUP_RUNNING" = "1" ]; then
+    return "$exit_code"
+  fi
+  CLEANUP_RUNNING=1
   if [ -n "$HEY_PID" ]; then
-    kill "$HEY_PID" 2>/dev/null || true
+    if ! kill "$HEY_PID" 2>/dev/null && kill -0 "$HEY_PID" 2>/dev/null; then
+      cleanup_status=1
+    fi
     wait "$HEY_PID" 2>/dev/null || true
     HEY_PID=""
   fi
   if [ "$PREWARMED_RESTORE_NEEDED" = "1" ] && [ -n "$APP_ID" ]; then
-    restore_prewarmed_demo
+    restore_prewarmed_demo || cleanup_status=1
   fi
-  rm -rf "$TMP_DIR"
+  if ! rm -rf "$TMP_DIR"; then
+    cleanup_status=1
+  fi
+  trap - EXIT
+  if [ "$cleanup_status" -ne 0 ] && [ "$exit_code" -eq 0 ]; then
+    exit_code=1
+  fi
+  exit "$exit_code"
 }
 trap cleanup EXIT
 
@@ -113,63 +130,142 @@ command -v hey >/dev/null || {
   export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"; }
 
 latest_instance_count() {
-  local start
-  start=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+  local start=${1:-$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)}
   az monitor metrics list \
     --resource "$APP_ID" --metric InstanceCount --interval PT1M \
     --aggregation Maximum --start-time "$start" -o json |
     jq -er '
-      [.value[0].timeseries[0].data[].maximum // empty]
+      [.value[0].timeseries[0].data[]?
+       | select(.maximum != null)
+       | [(.timeStamp // .timestamp), (.maximum | floor)]
+      ]
       | if length == 0 then
           error("InstanceCount metric unavailable")
         else
-          last | floor
+          sort_by(.[0])[] | @tsv
         end
     '
 }
 
 wait_for_single_instance() {
-  local count
+  local transition_at=$1
+  local transition_epoch last_timestamp="" consecutive=0 samples timestamp count sample_epoch
+  transition_epoch=$(date -d "$transition_at" +%s)
   for attempt in $(seq 1 20); do
-    if ! count=$(latest_instance_count 2>/dev/null); then
+    if ! samples=$(latest_instance_count "$transition_at" 2>/dev/null); then
       echo "InstanceCount=missing"
       sleep 30
       continue
     fi
-    echo "InstanceCount=$count"
-    [ "$count" -eq 1 ] && return 0
+    while IFS=$'\t' read -r timestamp count; do
+      [ -n "$timestamp" ] || continue
+      sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
+      [ "$sample_epoch" -gt "$transition_epoch" ] || continue
+      [ "$timestamp" = "$last_timestamp" ] && continue
+      last_timestamp=$timestamp
+      if [ "$count" -eq 1 ]; then
+        consecutive=$((consecutive + 1))
+      else
+        consecutive=0
+      fi
+      echo "InstanceCount=$count timestamp=$timestamp (${consecutive}/2)"
+      [ "$consecutive" -ge 2 ] && return 0
+    done <<< "$samples"
     sleep 30
   done
   return 1
 }
 
+wait_for_buffer_allocation() {
+  local transition_at=$1
+  local transition_epoch sample_epoch samples timestamp count
+  transition_epoch=$(date -d "$transition_at" +%s)
+  for attempt in $(seq 1 20); do
+    if samples=$(latest_instance_count "$transition_at" 2>/dev/null); then
+      while IFS=$'\t' read -r timestamp count; do
+        [ -n "$timestamp" ] || continue
+        sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
+        [ "$sample_epoch" -gt "$transition_epoch" ] || continue
+        echo "Prewarmed buffer signal: InstanceCount=$count timestamp=$timestamp"
+        [ "$count" -ge 2 ] && return 0
+      done <<< "$samples"
+    else
+      echo "Prewarmed buffer signal: InstanceCount=missing"
+    fi
+    sleep 30
+  done
+  return 1
+}
+
+wait_for_health() {
+  for attempt in $(seq 1 18); do
+    curl -fsS --max-time 10 "$APP_URL/health" >/dev/null && return 0
+    sleep 5
+  done
+  return 1
+}
+
 restore_prewarmed_demo() {
+  local status=0 settings startup_count
   [ -n "$APP_ID" ] || return 0
-  az rest --method patch \
+  if ! az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-    -o none || true
-  az webapp config appsettings delete -g "$RG" -n "$APP" \
-    --setting-names STARTUP_DELAY_SECONDS -o none || true
-  PREWARMED_RESTORE_NEEDED=0
+    -o none; then
+    status=1
+  fi
+  if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
+    --setting-names STARTUP_DELAY_SECONDS -o none
+  then
+    status=1
+  fi
+  if ! wait_for_health; then
+    echo "[07] 복원 후 /health 확인에 실패했습니다." >&2
+    status=1
+  fi
+  if ! settings=$(az rest --method get \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
+    -o json); then
+    status=1
+  elif ! jq -e '(.alwaysReady == 1 and .prewarmed == 1)' >/dev/null <<< "$settings"; then
+    echo "[07] 복원된 Always-ready/Prewarmed 설정이 예상과 다릅니다: $settings" >&2
+    status=1
+  fi
+  if ! startup_count=$(az webapp config appsettings list -g "$RG" -n "$APP" \
+    --query "[?name=='STARTUP_DELAY_SECONDS'] | length(@)" -o tsv); then
+    status=1
+  elif [ "$startup_count" != "0" ]; then
+    echo "[07] STARTUP_DELAY_SECONDS가 삭제되지 않았습니다." >&2
+    status=1
+  fi
+  if [ "$status" -eq 0 ]; then
+    PREWARMED_RESTORE_NEEDED=0
+    return 0
+  fi
+  return 1
 }
 
 measure_scale_out() {
   local label=$1
   local output_file=$2
   local result_var=$3
-  local started elapsed unique_instances
+  local started elapsed unique_instances deadline
 
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
   HEY_PID=$!
   started=$(date +%s)
+  deadline=$((started + 180))
   printf -v "$result_var" '%s' timeout
 
   for attempt in $(seq 1 36); do
+    [ "$(date +%s)" -lt "$deadline" ] || break
     unique_instances=$(
       for i in $(seq 1 30); do
-        curl -s "$APP_URL/api/info" | jq -r .instance
-      done | sort -u | wc -l
+        curl --fail --silent --show-error --max-time 5 "$APP_URL/api/info" 2>/dev/null |
+          jq -er 'if ((.instance? | type) == "string" and (.instance | length) > 0) then .instance else empty end' 2>/dev/null ||
+          true
+      done | sort -u | awk 'length($0) > 0' | wc -l
     )
     elapsed=$(( $(date +%s) - started ))
     echo "$label: ${elapsed}초, 응답 인스턴스 ${unique_instances}개"
@@ -185,9 +281,9 @@ measure_scale_out() {
   HEY_PID=""
 }
 
+PREWARMED_RESTORE_NEEDED=1
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 -o none
-PREWARMED_RESTORE_NEEDED=1
 
 for attempt in $(seq 1 18); do
   curl -fsS "$APP_URL/health" >/dev/null && break
@@ -195,7 +291,9 @@ for attempt in $(seq 1 18); do
 done
 
 if ! curl -fsS "$APP_URL/health" >/dev/null; then
-  restore_prewarmed_demo
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시작 지연 준비 단계의 복원에 실패했습니다." >&2
+  fi
   echo "[07] 시작 지연 준비 단계의 /health 확인이 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
   exit 1
 fi
@@ -204,19 +302,32 @@ az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
   -o none
+A_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-if ! wait_for_single_instance; then
-  restore_prewarmed_demo
-  echo "[07] 시험 A 기준 상태 복원에 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+if ! wait_for_single_instance "$A_TRANSITION_AT"; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 A 기준 상태 복원에 실패했습니다." >&2
+  fi
+  echo "[07] 시험 A 기준 상태를 확보하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다." >&2
   exit 1
 fi
 
 hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prime-0.out"
 measure_scale_out "Prewarmed=0" "$TMP_DIR/hey-burst-0.out" NO_PREWARM_SECONDS
 echo "Prewarmed=0: $NO_PREWARM_SECONDS"
+if [[ ! "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 A timeout 후 복원에 실패했습니다." >&2
+  fi
+  echo "[07] 시험 A가 timeout되어 시험 B를 실행하지 않습니다." >&2
+  exit 1
+fi
 
-if ! wait_for_single_instance; then
-  restore_prewarmed_demo
+SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 A 후 복원에 실패했습니다." >&2
+  fi
   echo "[07] 시험 B 시작 전 기준 상태 복원에 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
   exit 1
 fi
@@ -225,8 +336,16 @@ az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
   -o none
+B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prime-1.out"
+if ! wait_for_buffer_allocation "$B_TRANSITION_AT"; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 B Prewarmed 버퍼 확인 후 복원에 실패했습니다." >&2
+  fi
+  echo "[07] 시험 B에서 설정 변경 후 신선한 InstanceCount>=2 버퍼 할당 신호를 확인하지 못했습니다." >&2
+  exit 1
+fi
 measure_scale_out "Prewarmed=1" "$TMP_DIR/hey-burst-1.out" PREWARM_SECONDS
 echo "Prewarmed=1: $PREWARM_SECONDS"
 
@@ -236,12 +355,17 @@ if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; th
   echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
 else
   echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
-  restore_prewarmed_demo
+  if ! restore_prewarmed_demo; then
+    echo "[07] timeout 후 복원에 실패했습니다." >&2
+  fi
   echo "[07] 시험이 timeout되어 Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
   exit 1
 fi
 
-restore_prewarmed_demo
+if ! restore_prewarmed_demo; then
+  echo "[07] 복원에 실패했습니다. 이후 단계로 진행하지 않습니다." >&2
+  exit 1
+fi
 
 echo "===== [08] 진단 설정 + KQL + App Insights ($(date +%T)) ====="
 WEBAPP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)

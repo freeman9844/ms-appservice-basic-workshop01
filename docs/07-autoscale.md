@@ -196,61 +196,137 @@ Usage: hey [options...] <url>
 
 ```bash
 latest_instance_count() {
-  local start
-  start=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+  local start=${1:-$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)}
   az monitor metrics list \
     --resource "$APP_ID" --metric InstanceCount --interval PT1M \
     --aggregation Maximum --start-time "$start" -o json |
     jq -er '
-      [.value[0].timeseries[0].data[].maximum // empty]
+      [.value[0].timeseries[0].data[]?
+       | select(.maximum != null)
+       | [(.timeStamp // .timestamp), (.maximum | floor)]
+      ]
       | if length == 0 then
           error("InstanceCount metric unavailable")
         else
-          last | floor
+          sort_by(.[0])[] | @tsv
         end
     '
 }
 
 wait_for_single_instance() {
-  local count
+  local transition_at=$1
+  local transition_epoch last_timestamp="" consecutive=0 samples timestamp count sample_epoch
+  transition_epoch=$(date -d "$transition_at" +%s)
   for attempt in $(seq 1 20); do
-    if ! count=$(latest_instance_count 2>/dev/null); then
+    if ! samples=$(latest_instance_count "$transition_at" 2>/dev/null); then
       echo "InstanceCount=missing"
       sleep 30
       continue
     fi
-    echo "InstanceCount=$count"
-    [ "$count" -eq 1 ] && return 0
+    while IFS=$'\t' read -r timestamp count; do
+      [ -n "$timestamp" ] || continue
+      sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
+      [ "$sample_epoch" -gt "$transition_epoch" ] || continue
+      [ "$timestamp" = "$last_timestamp" ] && continue
+      last_timestamp=$timestamp
+      if [ "$count" -eq 1 ]; then
+        consecutive=$((consecutive + 1))
+      else
+        consecutive=0
+      fi
+      echo "InstanceCount=$count timestamp=$timestamp (${consecutive}/2)"
+      [ "$consecutive" -ge 2 ] && return 0
+    done <<< "$samples"
     sleep 30
   done
   return 1
 }
 
+wait_for_buffer_allocation() {
+  local transition_at=$1
+  local transition_epoch sample_epoch samples timestamp count
+  transition_epoch=$(date -d "$transition_at" +%s)
+  for attempt in $(seq 1 20); do
+    if samples=$(latest_instance_count "$transition_at" 2>/dev/null); then
+      while IFS=$'\t' read -r timestamp count; do
+        [ -n "$timestamp" ] || continue
+        sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
+        [ "$sample_epoch" -gt "$transition_epoch" ] || continue
+        echo "Prewarmed buffer signal: InstanceCount=$count timestamp=$timestamp"
+        [ "$count" -ge 2 ] && return 0
+      done <<< "$samples"
+    else
+      echo "Prewarmed buffer signal: InstanceCount=missing"
+    fi
+    sleep 30
+  done
+  return 1
+}
+
+wait_for_health() {
+  for attempt in $(seq 1 18); do
+    curl -fsS --max-time 10 "$APP_URL/health" >/dev/null && return 0
+    sleep 5
+  done
+  return 1
+}
+
 restore_autoscale_defaults() {
-  az rest --method patch \
+  local status=0 settings startup_count
+  if ! az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-    --output none
-  az webapp config appsettings delete -g "$RG" -n "$APP" \
+    --output none; then
+    status=1
+  fi
+  if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
     --setting-names STARTUP_DELAY_SECONDS --output none
+  then
+    status=1
+  fi
+  if ! wait_for_health; then
+    echo "복원 후 /health 확인에 실패했습니다." >&2
+    status=1
+  fi
+  if ! settings=$(az rest --method get \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
+    -o json); then
+    status=1
+  elif ! jq -e '(.alwaysReady == 1 and .prewarmed == 1)' >/dev/null <<< "$settings"; then
+    echo "복원된 Always-ready/Prewarmed 설정이 예상과 다릅니다: $settings" >&2
+    status=1
+  fi
+  if ! startup_count=$(az webapp config appsettings list -g "$RG" -n "$APP" \
+    --query "[?name=='STARTUP_DELAY_SECONDS'] | length(@)" -o tsv); then
+    status=1
+  elif [ "$startup_count" != "0" ]; then
+    echo "STARTUP_DELAY_SECONDS가 삭제되지 않았습니다." >&2
+    status=1
+  fi
+  return "$status"
 }
 
 measure_scale_out() {
   local label=$1
   local output_file=$2
   local result_var=$3
-  local started elapsed unique_instances
+  local started elapsed unique_instances deadline
 
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
   local load_pid=$!
   started=$(date +%s)
+  deadline=$((started + 180))
   printf -v "$result_var" '%s' timeout
 
   for attempt in $(seq 1 36); do
+    [ "$(date +%s)" -lt "$deadline" ] || break
     unique_instances=$(
       for i in $(seq 1 30); do
-        curl -s "$APP_URL/api/info" | jq -r .instance
-      done | sort -u | wc -l
+        curl --fail --silent --show-error --max-time 5 "$APP_URL/api/info" 2>/dev/null |
+          jq -er 'if ((.instance? | type) == "string" and (.instance | length) > 0) then .instance else empty end' 2>/dev/null ||
+          true
+      done | sort -u | awk 'length($0) > 0' | wc -l
     )
     elapsed=$(( $(date +%s) - started ))
     echo "$label: ${elapsed}초, 응답 인스턴스 ${unique_instances}개"
@@ -268,7 +344,7 @@ measure_scale_out() {
 
 > 👁️ 여기서 `InstanceCount` 메트릭은 **시험 시작 전 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 측정 결과는 `/api/info`가 돌려주는 **응답 인스턴스 ID가 2종류 이상으로 보이기까지 걸린 시간**입니다.
 >
-> `wait_for_single_instance`는 메트릭 공백을 `InstanceCount=missing`으로 취급하며, **실제 메트릭 값이 정확히 `1`일 때만** 기준 상태로 인정합니다. Azure Portal에서는 같은 메트릭을 **Automatic Scaling Instance Count**로 볼 수 있습니다.
+> `wait_for_single_instance`는 설정 변경 시각 이후의 타임스탬프가 있는 메트릭만 읽고, 서로 다른 시각의 `InstanceCount=1` 샘플이 **연속 두 번** 관찰될 때만 기준 상태로 인정합니다. 따라서 이전 시험의 `1` 값만으로 새 시험이 시작되지 않습니다. Azure Portal에서는 같은 메트릭을 **Automatic Scaling Instance Count**로 볼 수 있습니다.
 
 🟢 **실행 — 시작 지연 설정 및 앱 준비**
 
@@ -284,8 +360,11 @@ done
 if curl -fsS "$APP_URL/health"; then
   :
 else
-  restore_autoscale_defaults
+  if ! restore_autoscale_defaults; then
+    echo "시작 지연 준비 단계의 복원에 실패했습니다." >&2
+  fi
   echo "시작 지연 준비 단계의 /health 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제를 마쳤으니 Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
+  exit 1
 fi
 ```
 
@@ -308,14 +387,18 @@ az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
   --output none
+A_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
 🟢 **실행 — 시험 A 시작 전 단일 인스턴스 기준 상태 확인**
 
 ```bash
-if ! wait_for_single_instance; then
-  restore_autoscale_defaults
+if ! wait_for_single_instance "$A_TRANSITION_AT"; then
+  if ! restore_autoscale_defaults; then
+    echo "시험 A 기준 상태 복원에 실패했습니다." >&2
+  fi
   echo "기준 상태 복원을 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
+  exit 1
 fi
 ```
 
@@ -324,9 +407,18 @@ fi
 🟢 **실행 — 시험 A 부하 발생 및 측정**
 
 ```bash
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prime-0.out
-measure_scale_out "Prewarmed=0" /tmp/hey-burst-0.out NO_PREWARM_SECONDS
+AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
+mkdir -p "$AB_DIR"
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-0.out"
+measure_scale_out "Prewarmed=0" "$AB_DIR/hey-burst-0.out" NO_PREWARM_SECONDS
 echo "Prewarmed=0: $NO_PREWARM_SECONDS"
+if [[ ! "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+  if ! restore_autoscale_defaults; then
+    echo "시험 A timeout 후 복원에 실패했습니다." >&2
+  fi
+  echo "시험 A가 timeout되어 시험 B를 실행하지 않습니다." >&2
+  exit 1
+fi
 ```
 
 📋 **예상 출력** (예시)
@@ -349,9 +441,13 @@ Prewarmed=0: 53
 🟢 **실행 — 시험 B 시작 전 기준 상태 재확인**
 
 ```bash
-if ! wait_for_single_instance; then
-  restore_autoscale_defaults
+SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
+  if ! restore_autoscale_defaults; then
+    echo "시험 A 후 복원에 실패했습니다." >&2
+  fi
   echo "기준 상태 복원을 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 시험 B 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
+  exit 1
 fi
 ```
 
@@ -364,9 +460,17 @@ az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
   --output none
+B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > /tmp/hey-prime-1.out
-measure_scale_out "Prewarmed=1" /tmp/hey-burst-1.out PREWARM_SECONDS
+hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-1.out"
+if ! wait_for_buffer_allocation "$B_TRANSITION_AT"; then
+  if ! restore_autoscale_defaults; then
+    echo "시험 B Prewarmed 버퍼 확인 후 복원에 실패했습니다." >&2
+  fi
+  echo "시험 B에서 설정 변경 후 신선한 InstanceCount>=2 버퍼 할당 신호를 확인하지 못했습니다." >&2
+  exit 1
+fi
+measure_scale_out "Prewarmed=1" "$AB_DIR/hey-burst-1.out" PREWARM_SECONDS
 echo "Prewarmed=1: $PREWARM_SECONDS"
 ```
 
@@ -396,6 +500,10 @@ if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; th
   echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
 else
   echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
+  if ! restore_autoscale_defaults; then
+    echo "timeout 후 복원에 실패했습니다." >&2
+  fi
+  exit 1
 fi
 ```
 
@@ -410,7 +518,10 @@ Prewarmed=1 : 24초
 🟢 **실행 — 모듈 기본 상태로 복원**
 
 ```bash
-restore_autoscale_defaults
+if ! restore_autoscale_defaults; then
+  echo "복원에 실패했습니다. 설정과 /health를 다시 확인한 뒤 다음 모듈로 진행하지 마세요." >&2
+  exit 1
+fi
 ```
 
 > 👁️ 정리 후 모듈 종료 상태는 다시 **Always ready 1 · Prewarmed 1 · Maximum burst 5**이며, `STARTUP_DELAY_SECONDS`도 제거되어 다음 모듈에 실험용 지연이 남지 않습니다.
@@ -455,7 +566,14 @@ az webapp config appsettings list -g "$RG" -n "$APP" \
 []
 ```
 
-또한 `wait_for_single_instance`를 다시 실행했을 때 최종적으로 `InstanceCount=1`이 나오면 다음 모듈로 넘어갈 준비가 된 것입니다.
+🟢 **실행 — 복원 이후 신선한 단일 인스턴스 기준 확인**
+
+```bash
+FINAL_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+wait_for_single_instance "$FINAL_TRANSITION_AT"
+```
+
+복원 이후 서로 다른 시각의 `InstanceCount=1` 샘플 두 개가 나오면 다음 모듈로 넘어갈 준비가 된 것입니다.
 
 ---
 
