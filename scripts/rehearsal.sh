@@ -236,6 +236,9 @@ if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; th
   echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
 else
   echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
+  restore_prewarmed_demo
+  echo "[07] 시험이 timeout되어 Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+  exit 1
 fi
 
 restore_prewarmed_demo
