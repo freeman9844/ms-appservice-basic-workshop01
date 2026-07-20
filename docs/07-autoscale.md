@@ -264,16 +264,30 @@ wait_for_buffer_allocation() {
 }
 
 wait_for_health() {
+  local body
   for attempt in $(seq 1 18); do
-    curl -fsS --max-time 10 "$APP_URL/health" >/dev/null && return 0
+    if body=$(curl -fsS --max-time 10 "$APP_URL/health") &&
+      jq -e '.status == "ok"' >/dev/null <<< "$body"
+    then
+      printf '%s\n' "$body"
+      return 0
+    fi
     sleep 5
   done
   return 1
 }
 
 prepare_startup_delay() {
-  az webapp config appsettings set -g "$RG" -n "$APP" \
+  if ! az webapp config appsettings set -g "$RG" -n "$APP" \
     --settings STARTUP_DELAY_SECONDS=20 --output none
+  then
+    if ! restore_autoscale_defaults; then
+      echo "시작 지연 설정에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
+    else
+      echo "시작 지연 설정에 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요." >&2
+    fi
+    return 1
+  fi
 
   if ! wait_for_health; then
     if ! restore_autoscale_defaults; then
@@ -380,7 +394,7 @@ measure_scale_out() {
 prepare_startup_delay
 ```
 
-> 👁️ `wait_for_health`는 `/health` 응답을 화면에 출력하지 않지만, 실제 본문은 `{"status":"ok"}`입니다.
+> 👁️ `wait_for_health`는 제한 시간 내 `/health`가 성공하고 JSON의 `status`가 `ok`인지 확인한 뒤 실제 응답 본문(예: `{"status":"ok"}`)을 출력합니다. 실패하면 최대 18회 재시도 후 1을 반환합니다.
 
 📋 **예상 출력**
 
@@ -398,10 +412,18 @@ prepare_startup_delay
 
 ```bash
 run_trial_a() {
-  az rest --method patch \
+  if ! az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
     --output none
+  then
+    if ! restore_autoscale_defaults; then
+      echo "시험 A 설정 변경에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
+    else
+      echo "시험 A 설정 변경에 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요." >&2
+    fi
+    return 1
+  fi
   A_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   if ! wait_for_single_instance "$A_TRANSITION_AT"; then
@@ -462,10 +484,18 @@ run_trial_b() {
     return 1
   fi
 
-  az rest --method patch \
+  if ! az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
     --output none
+  then
+    if ! restore_autoscale_defaults; then
+      echo "시험 B 설정 변경에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 이 시험을 다시 시작하지 마세요." >&2
+    else
+      echo "시험 B 설정 변경에 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요." >&2
+    fi
+    return 1
+  fi
   B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-1.out"

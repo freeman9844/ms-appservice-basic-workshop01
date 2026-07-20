@@ -198,8 +198,14 @@ wait_for_buffer_allocation() {
 }
 
 wait_for_health() {
+  local body
   for attempt in $(seq 1 18); do
-    curl -fsS --max-time 10 "$APP_URL/health" >/dev/null && return 0
+    if body=$(curl -fsS --max-time 10 "$APP_URL/health") &&
+      jq -e '.status == "ok"' >/dev/null <<< "$body"
+    then
+      printf '%s\n' "$body"
+      return 0
+    fi
     sleep 5
   done
   return 1
@@ -299,9 +305,11 @@ az webapp config appsettings set -g "$RG" -n "$APP" \
 
 if ! wait_for_health; then
   if ! restore_prewarmed_demo; then
-    echo "[07] 시작 지연 준비 단계의 복원에 실패했습니다." >&2
+    echo "[07] 시작 지연 준비 단계의 복원 및 검증에 실패했습니다." >&2
+  else
+    echo "[07] 시작 지연 준비 단계의 복원 및 검증을 완료했습니다." >&2
   fi
-  echo "[07] 시작 지연 준비 단계의 /health 확인이 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+  echo "[07] 시작 지연 준비 단계의 /health 확인이 실패했습니다." >&2
   exit 1
 fi
 
@@ -333,9 +341,11 @@ fi
 SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
   if ! restore_prewarmed_demo; then
-    echo "[07] 시험 A 후 복원에 실패했습니다." >&2
+    echo "[07] 시험 A 후 복원 및 검증에 실패했습니다." >&2
+  else
+    echo "[07] 시험 A 후 복원 및 검증을 완료했습니다." >&2
   fi
-  echo "[07] 시험 B 시작 전 기준 상태 복원에 실패했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+  echo "[07] 시험 B 시작 전 기준 상태를 확보하지 못했습니다." >&2
   exit 1
 fi
 
@@ -363,9 +373,11 @@ if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; th
 else
   echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
   if ! restore_prewarmed_demo; then
-    echo "[07] timeout 후 복원에 실패했습니다." >&2
+    echo "[07] timeout 후 복원 및 검증에 실패했습니다." >&2
+  else
+    echo "[07] timeout 후 복원 및 검증을 완료했습니다." >&2
   fi
-  echo "[07] 시험이 timeout되어 Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 완료했습니다." >&2
+  echo "[07] 시험이 timeout되어 중단합니다." >&2
   exit 1
 fi
 
