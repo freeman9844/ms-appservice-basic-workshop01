@@ -118,15 +118,27 @@ flowchart LR
 PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
 APP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
 
-az rest --method patch \
-  --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
-  --output none
+enable_autoscale() {
+  if ! az rest --method patch \
+    --uri "${PLAN_ID}?api-version=2024-11-01" \
+    --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+    --output none
+  then
+    echo "Plan PATCH에 실패했습니다. Web App PATCH는 실행하지 않았습니다. Cloud Shell은 유지한 채 1단계를 다시 실행해 plan/app ID를 다시 확인한 뒤 재시도하세요." >&2
+    return 1
+  fi
 
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none
+  if ! az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+    --output none
+  then
+    echo "Plan PATCH는 적용됐지만 Web App PATCH에 실패했습니다. Cloud Shell은 유지한 채 1단계를 다시 실행해 Web App 설정을 완료하세요." >&2
+    return 1
+  fi
+}
+
+enable_autoscale
 ```
 
 > 👁️ ARM 속성 `elasticScaleEnabled`는 Plan을 Automatic scaling 모드로 전환합니다. `maximumElasticWorkerCount`는 Maximum burst, `minimumElasticInstanceCount`는 Always-ready 최소값, `preWarmedInstanceCount`는 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
