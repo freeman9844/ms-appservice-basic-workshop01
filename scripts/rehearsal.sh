@@ -348,7 +348,7 @@ run_instance_age_trial() {
     HEY_FAILURE=1
     echo "$label hey 부하가 실패했습니다 (exit=$hey_status)." >&2
   fi
-  return "$hey_status"
+  return "$observer_status"
 }
 
 handle_trial_observations() {

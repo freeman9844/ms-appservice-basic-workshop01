@@ -23,6 +23,7 @@ def test_rehearsal_preserves_hey_failures_and_stops_tracked_pid():
     assert '[[ "$process_state" != *Z*' in REHEARSAL
     assert 'if [ "$observer_status" -ne 0 ]; then' in REHEARSAL
     assert 'return "$observer_status"' in REHEARSAL
+    assert 'return "$hey_status"' not in REHEARSAL
     assert "HEY_FAILURE=1" in REHEARSAL
     assert "HEY_STATUS=$hey_status" in REHEARSAL
     assert "동시에 실패했습니다" in REHEARSAL
@@ -30,6 +31,8 @@ def test_rehearsal_preserves_hey_failures_and_stops_tracked_pid():
     assert 'wait "$HEY_PID" || true' not in REHEARSAL
     assert "동시에 실패했습니다" in DOCS
     assert "HEY_STATUS=$hey_status" in DOCS
+    assert 'return "$observer_status"' in DOCS
+    assert 'return "$hey_status"' not in DOCS
 
 
 def test_baseline_id_acquisition_is_distinct_from_observer_failure():
