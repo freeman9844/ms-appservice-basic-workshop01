@@ -8,12 +8,35 @@ def section(text, start, end):
     return text.split(start, 1)[1].split(end, 1)[0]
 
 
+def normalize(block):
+    return "\n".join(line.rstrip() for line in block.strip().splitlines())
+
+
 def test_step_one_is_direct_cli_flow():
     text = DOC.read_text(encoding="utf-8")
     step_one = section(
         text,
         "## 1단계 — Automatic scaling 활성화",
         "## 2단계 — hey 부하 도구 설치",
+    )
+    step_one_chain = step_one[
+        step_one.index("az rest --method patch") : step_one.index(
+            'echo "Automatic scaling 설정 완료"'
+        )
+        + len('echo "Automatic scaling 설정 완료"')
+    ]
+    expected_step_one_chain = "\n".join(
+        [
+            "az rest --method patch \\",
+            '  --uri "${PLAN_ID}?api-version=2024-11-01" \\',
+            '  --body \'{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}\' \\',
+            "  --output none &&",
+            "az rest --method patch \\",
+            '  --uri "${APP_ID}/config/web?api-version=2024-11-01" \\',
+            '  --body \'{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}\' \\',
+            "  --output none &&",
+            'echo "Automatic scaling 설정 완료"',
+        ]
     )
 
     assert "verify_plan_configuration()" not in step_one
@@ -22,24 +45,12 @@ def test_step_one_is_direct_cli_flow():
     assert step_one.count("az rest --method patch") == 2
     assert step_one.count("az rest --method get") == 2
     assert step_one.count("api-version=2024-11-01") == 4
+    assert normalize(step_one_chain) == normalize(expected_step_one_chain)
 
     required_snippets = {
-        "plan API version": "--uri \"${PLAN_ID}?api-version=2024-11-01\"",
-        "app API version": "--uri \"${APP_ID}/config/web?api-version=2024-11-01\"",
-        "plan SKU name": '"name":"P0v4"',
-        "plan SKU tier": '"tier":"PremiumV4"',
-        "plan SKU size": '"size":"P0v4"',
-        "plan SKU family": '"family":"Pv4"',
-        "plan SKU capacity": '"capacity":1',
-        "automatic scaling enabled": '"elasticScaleEnabled":true',
-        "maximum burst": '"maximumElasticWorkerCount":5',
-        "minimum elastic instance count": '"minimumElasticInstanceCount":1',
-        "prewarmed instance count": '"preWarmedInstanceCount":1',
         "plan read-back query": '--query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"',
         "web read-back query": '--query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"',
-        "chained patch flow": "--output none &&",
         "stop-on-error guidance": "오류가 출력되거나 `Automatic scaling 설정 완료`가 보이지 않으면 다음 단계로 진행하지 말고",
-        "completion message": 'echo "Automatic scaling 설정 완료"',
     }
 
     for label, snippet in required_snippets.items():
