@@ -585,6 +585,8 @@ render_instance_age_results() {
   jq -r '
     .[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv
   ' "$PREWARM_OBSERVATIONS"
+
+  echo "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 }
 
 render_instance_age_results
@@ -601,7 +603,6 @@ Prewarmed=1	RD0003FFEE33FF	2026-07-21T02:37:18Z	2026-07-21T02:38:06Z	48
 
 - `Prewarmed=1` 행의 `first_response_age`가 20초를 눈에 띄게 넘으면, 준비된 instance가 시작 준비를 마친 뒤 실제 응답 전에 기다린 구간이 관찰된 것입니다. 이는 Prewarmed 버퍼 체류와 **일치하는 외부 증거**로 해석합니다.
 - `Prewarmed=0`과 `Prewarmed=1`의 age가 비슷하면, 이번 실행에서는 버퍼 체류 차이가 뚜렷하게 보이지 않았고 준비된 instance가 곧바로 활성화되었을 수 있다고 설명합니다.
-- 결과 표 아래의 `[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다.` 문장은 단일 실행의 속도 승자를 선언하지 않겠다는 뜻입니다.
 
 🟢 **실행 — 모듈 기본 상태로 복원**
 
