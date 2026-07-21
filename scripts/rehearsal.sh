@@ -266,6 +266,46 @@ run_instance_age_trial() {
   return "$observer_status"
 }
 
+handle_trial_observations() {
+  local label=$1
+  local observation_file=$2
+  local observer_status=$3
+
+  case "$observer_status" in
+    0)
+      if jq -e 'type == "array" and length > 0' "$observation_file" >/dev/null 2>&1; then
+        return 0
+      fi
+      if ! restore_prewarmed_demo; then
+        echo "[07] ${label} 관찰 도구가 유효한 JSON 배열을 남기지 못했고 복원에도 실패했습니다." >&2
+      fi
+      echo "[07] ${label} 관찰 도구가 유효한 JSON 배열을 남기지 못했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
+      return 1
+      ;;
+    1)
+      if ! restore_prewarmed_demo; then
+        echo "[07] ${label} 관찰 도구 실패 후 복원에 실패했습니다." >&2
+      fi
+      echo "[07] ${label} 관찰 도구가 실패했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
+      return 1
+      ;;
+    2)
+      if ! restore_prewarmed_demo; then
+        echo "[07] ${label}에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다." >&2
+      fi
+      echo "[07] ${label}에서 새 instance를 관찰하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다. 부하를 다시 걸어 3단계부터 재실행하세요." >&2
+      return 2
+      ;;
+    *)
+      if ! restore_prewarmed_demo; then
+        echo "[07] ${label} 관찰 도구가 예상하지 못한 상태($observer_status)로 종료했고 복원에도 실패했습니다." >&2
+      fi
+      echo "[07] ${label} 관찰 도구가 예상하지 못한 상태($observer_status)로 종료했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
+      return 1
+      ;;
+  esac
+}
+
 PREWARMED_RESTORE_NEEDED=1
 if ! az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 -o none
@@ -321,19 +361,11 @@ if run_instance_age_trial "Prewarmed=0" "$NO_PREWARM_OBSERVATIONS" "$TMP_DIR/hey
 else
   observer_status=$?
 fi
-if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$NO_PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
-  if ! restore_prewarmed_demo; then
-    echo "[07] 시험 A에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다." >&2
-  fi
-  echo "[07] 시험 A에서 새 instance를 관찰하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다. 부하를 다시 걸어 3단계부터 재실행하세요." >&2
-  exit 1
-fi
-if [ "$observer_status" -ne 0 ]; then
-  if ! restore_prewarmed_demo; then
-    echo "[07] 시험 A 관찰 도구 실패 후 복원에 실패했습니다." >&2
-  fi
-  echo "[07] 시험 A 관찰 도구가 실패했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
-  exit 1
+if handle_trial_observations "시험 A" "$NO_PREWARM_OBSERVATIONS" "$observer_status"; then
+  :
+else
+  trial_exit=$?
+  exit "$trial_exit"
 fi
 
 SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -375,22 +407,14 @@ if run_instance_age_trial "Prewarmed=1" "$PREWARM_OBSERVATIONS" "$TMP_DIR/hey-bu
 else
   observer_status=$?
 fi
-if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
-  if ! restore_prewarmed_demo; then
-    echo "[07] 시험 B에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다." >&2
-  fi
-  echo "[07] 시험 B에서 새 instance를 관찰하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다. 부하를 다시 걸어 3단계부터 재실행하세요." >&2
-  exit 1
-fi
-if [ "$observer_status" -ne 0 ]; then
-  if ! restore_prewarmed_demo; then
-    echo "[07] 시험 B 관찰 도구 실패 후 복원에 실패했습니다." >&2
-  fi
-  echo "[07] 시험 B 관찰 도구가 실패했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
-  exit 1
+if handle_trial_observations "시험 B" "$PREWARM_OBSERVATIONS" "$observer_status"; then
+  :
+else
+  trial_exit=$?
+  exit "$trial_exit"
 fi
 
-printf 'trial\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age\n'
+printf '시험\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age\n'
 jq -r '.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv' \
   "$NO_PREWARM_OBSERVATIONS"
 jq -r '.[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv' \

@@ -1,7 +1,14 @@
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 
 from scripts import observe_instances as oi
+
+
+ROOT = Path(__file__).resolve().parents[2]
+HEADER = "시험\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age"
+SCRIPT_HEADER = "printf '시험\\tinstance\\tstarted_at\\tfirst_seen_at\\tfirst_response_age\\n'"
+DISCLAIMER = "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 
 
 def utc(value):
@@ -153,6 +160,14 @@ def test_main_returns_0_1_and_2(monkeypatch, tmp_path, capsys):
         == 1
     )
     assert "must be positive" in capsys.readouterr().err
+
+    rehearsal = (ROOT / "scripts/rehearsal.sh").read_text(encoding="utf-8")
+    docs = (ROOT / "docs/07-autoscale.md").read_text(encoding="utf-8")
+
+    assert SCRIPT_HEADER in rehearsal
+    assert f'echo "{DISCLAIMER}"' in rehearsal
+    assert HEADER in docs
+    assert DISCLAIMER in docs
 
 
 class _FakeFuture:
