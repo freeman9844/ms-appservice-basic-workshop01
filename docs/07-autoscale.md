@@ -18,6 +18,15 @@
 - **Always-ready instances**와 **Prewarmed instances**의 역할과 비용 차이를 이해합니다.
 - 모듈 종료 상태: **Automatic scaling 활성(Always ready 1·Prewarmed 1·Maximum burst 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
 
+## 공통 상태 — 항상 실행
+
+> 🟢 이 줄은 같은 터미널로 이어서 진행하든, 새 Cloud Shell에서 다시 시작하든 먼저 실행합니다.
+> `REPO_DIR`는 이후 모든 헬퍼가 쓰는 고정 경로이므로 여기서 항상 정의합니다.
+
+```bash
+REPO_DIR="$HOME/ms-appservice-basic-workshop01"
+```
+
 ---
 
 ## 0단계 — (선택) 변수 재설정
@@ -37,7 +46,6 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
-REPO_DIR="$HOME/ms-appservice-basic-workshop01"
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
 echo "APP_URL=$APP_URL"
 ```
@@ -337,8 +345,12 @@ run_instance_age_trial() {
   local hey_output=$3
   local baseline_instance observer_status=0
 
-  baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
+  if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
+  then
+    echo "$label 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
+    return 1
+  fi
 
   echo "$label 기준 instance: $baseline_instance"
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$hey_output" &
@@ -665,7 +677,7 @@ wait_for_single_instance "$FINAL_TRANSITION_AT"
 
 `observe_instances.py`가 2로 종료되거나 JSON 배열이 비어 있으면, 이번 burst에서 새 instance를 끝내지 못한 것입니다. 한 번의 실행만으로 Automatic scaling 실패나 `Prewarmed` 무효를 단정하지 말고 다음을 점검합니다.
 
-- 새 Cloud Shell에서 시작했다면 0단계의 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`인지 확인합니다.
+- 새 Cloud Shell에서 시작했다면 위 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인한 뒤, 0단계에서 `SUFFIX`와 Azure 리소스 변수만 다시 맞춥니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
 - 복원 helper가 끝난 뒤 `wait_for_single_instance`로 기준 상태를 다시 확인하고 3단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
