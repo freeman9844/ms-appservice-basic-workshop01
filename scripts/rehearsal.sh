@@ -294,7 +294,7 @@ handle_trial_observations() {
         echo "[07] ${label}에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다." >&2
       fi
       echo "[07] ${label}에서 새 instance를 관찰하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다. 부하를 다시 걸어 3단계부터 재실행하세요." >&2
-      return 2
+      return 1
       ;;
     *)
       if ! restore_prewarmed_demo; then
@@ -364,8 +364,7 @@ fi
 if handle_trial_observations "시험 A" "$NO_PREWARM_OBSERVATIONS" "$observer_status"; then
   :
 else
-  trial_exit=$?
-  exit "$trial_exit"
+  exit 1
 fi
 
 SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -410,11 +409,10 @@ fi
 if handle_trial_observations "시험 B" "$PREWARM_OBSERVATIONS" "$observer_status"; then
   :
 else
-  trial_exit=$?
-  exit "$trial_exit"
+  exit 1
 fi
 
-printf '시험\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age\n'
+printf 'trial\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age\n'
 jq -r '.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv' \
   "$NO_PREWARM_OBSERVATIONS"
 jq -r '.[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv' \

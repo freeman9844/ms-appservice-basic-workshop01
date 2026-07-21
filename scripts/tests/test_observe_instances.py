@@ -6,8 +6,8 @@ from scripts import observe_instances as oi
 
 
 ROOT = Path(__file__).resolve().parents[2]
-HEADER = "시험\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age"
-SCRIPT_HEADER = "printf '시험\\tinstance\\tstarted_at\\tfirst_seen_at\\tfirst_response_age\\n'"
+HEADER = "trial\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age"
+SCRIPT_HEADER = "printf 'trial\\tinstance\\tstarted_at\\tfirst_seen_at\\tfirst_response_age\\n'"
 DISCLAIMER = "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 
 
@@ -168,6 +168,12 @@ def test_main_returns_0_1_and_2(monkeypatch, tmp_path, capsys):
     assert f'echo "{DISCLAIMER}"' in rehearsal
     assert HEADER in docs
     assert DISCLAIMER in docs
+
+    assert (
+        'echo "[07] ${label}에서 새 instance를 관찰하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다. 부하를 다시 걸어 3단계부터 재실행하세요." >&2\n      return 1'
+        in rehearsal
+    )
+    assert "trial_exit=$?" not in rehearsal
 
 
 class _FakeFuture:

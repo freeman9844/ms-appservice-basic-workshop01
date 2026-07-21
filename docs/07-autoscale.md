@@ -377,7 +377,7 @@ run_instance_age_trial() {
 
 > 👁️ `InstanceCount` 메트릭은 **시험 시작 전·시험 사이의 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 관찰값은 `observe_instances.py`가 수집한 새 instance의 `started_at`, `first_seen_at`, `first_response_age`입니다.
 
-> 👁️ `observe_instances.py`는 새 instance를 관찰할 때마다 표 한 줄을 출력하고, 종료 시 JSON 배열을 `--output`에 저장합니다. 새 instance를 관찰하면 0, 관찰하지 못하면 2로 종료하므로 `run_instance_age_trial`은 그 종료 코드를 그대로 반환합니다.
+> 👁️ `observe_instances.py`는 새 instance를 관찰할 때마다 표 한 줄을 출력하고, 종료 시 JSON 배열을 `--output`에 저장합니다. 새 instance를 관찰하면 0, 관찰하지 못하면 2로 종료합니다. `run_instance_age_trial`과 이후 호출부는 실패한 trial을 복원 + 재시도 안내와 함께 최종 종료 1로 정규화합니다.
 
 🟢 **실행 — 시작 지연 설정 및 앱 준비**
 
@@ -577,7 +577,7 @@ RD0003FFEE33FF	2026-07-21T02:37:18Z	2026-07-21T02:38:06Z	48
 ```bash
 render_instance_age_results() {
   jq -r '
-    ["시험","instance","started_at","first_seen_at","first_response_age"],
+    ["trial","instance","started_at","first_seen_at","first_response_age"],
     (.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)])
     | @tsv
   ' "$NO_PREWARM_OBSERVATIONS"
@@ -595,7 +595,7 @@ render_instance_age_results
 📋 **예상 출력** (예시)
 
 ```text
-시험	instance	started_at	first_seen_at	first_response_age
+trial	instance	started_at	first_seen_at	first_response_age
 Prewarmed=0	RD0003FFCC22DD	2026-07-21T02:32:18Z	2026-07-21T02:32:39Z	21
 Prewarmed=1	RD0003FFEE33FF	2026-07-21T02:37:18Z	2026-07-21T02:38:06Z	48
 [07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다.
