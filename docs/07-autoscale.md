@@ -25,6 +25,7 @@
 > ⏭️ **06 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
 > 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
 > `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+> 이후 헬퍼는 기본 클론 경로 `~/ms-appservice-basic-workshop01`를 기준으로 동작합니다. 새 Cloud Shell은 현재 디렉터리를 보장하지 않으므로, 스크립트 경로를 고정해 둡니다.
 
 🟢 **실행**
 
@@ -36,6 +37,7 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
+REPO_DIR="$HOME/ms-appservice-basic-workshop01"
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
 echo "APP_URL=$APP_URL"
 ```
@@ -342,7 +344,7 @@ run_instance_age_trial() {
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$hey_output" &
   HEY_PID=$!
 
-  if python3 ../scripts/observe_instances.py \
+  if python3 "$REPO_DIR/scripts/observe_instances.py" \
     --url "$APP_URL/api/info" \
     --baseline-instance "$baseline_instance" \
     --duration 180 \
@@ -417,11 +419,15 @@ run_trial_a() {
   AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
   mkdir -p "$AB_DIR"
   NO_PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-0-observations.json"
-  run_instance_age_trial \
+  if run_instance_age_trial \
     "Prewarmed=0" \
     "$NO_PREWARM_OBSERVATIONS" \
     "$AB_DIR/hey-burst-0.out"
-  observer_status=$?
+  then
+    observer_status=0
+  else
+    observer_status=$?
+  fi
 
   if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$NO_PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
     if ! restore_autoscale_defaults; then
@@ -504,11 +510,15 @@ run_trial_b() {
 
   AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
   PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-1-observations.json"
-  run_instance_age_trial \
+  if run_instance_age_trial \
     "Prewarmed=1" \
     "$PREWARM_OBSERVATIONS" \
     "$AB_DIR/hey-burst-1.out"
-  observer_status=$?
+  then
+    observer_status=0
+  else
+    observer_status=$?
+  fi
 
   if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
     if ! restore_autoscale_defaults; then
@@ -653,8 +663,9 @@ wait_for_single_instance "$FINAL_TRANSITION_AT"
 
 ### (1) 새 instance를 관찰하지 못함
 
-`observe_instances.py`가 2로 종료되거나 JSON 배열이 비어 있으면, 이번 burst에서 기준 instance 외의 새 instance가 응답에 나타나지 않은 것입니다. 한 번의 실행만으로 Automatic scaling 실패나 `Prewarmed` 무효를 단정하지 말고 다음을 점검합니다.
+`observe_instances.py`가 2로 종료되거나 JSON 배열이 비어 있으면, 이번 burst에서 새 instance를 끝내지 못한 것입니다. 한 번의 실행만으로 Automatic scaling 실패나 `Prewarmed` 무효를 단정하지 말고 다음을 점검합니다.
 
+- 새 Cloud Shell에서 시작했다면 0단계의 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`인지 확인합니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
 - 복원 helper가 끝난 뒤 `wait_for_single_instance`로 기준 상태를 다시 확인하고 3단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
