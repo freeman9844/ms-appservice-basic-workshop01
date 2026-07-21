@@ -129,6 +129,50 @@ flowchart LR
 PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
 APP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
 
+verify_plan_configuration() {
+  local settings
+  if ! settings=$(az rest --method get \
+    --uri "${PLAN_ID}?api-version=2024-11-01" \
+    --query "properties.{elasticScaleEnabled:elasticScaleEnabled,maximumElasticWorkerCount:maximumElasticWorkerCount}" \
+    --output json)
+  then
+    echo "Plan 설정 read-back에 실패했습니다." >&2
+    return 1
+  fi
+  if ! jq -e '(.elasticScaleEnabled == true and .maximumElasticWorkerCount == 5)' \
+    >/dev/null <<< "$settings"
+  then
+    echo "Plan 설정 read-back이 예상과 다릅니다: $settings" >&2
+    return 1
+  fi
+}
+
+set_prewarmed_configuration() {
+  local expected=$1 settings
+  if ! az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body "{\"properties\":{\"minimumElasticInstanceCount\":1,\"preWarmedInstanceCount\":${expected}}}" \
+    --output none
+  then
+    echo "Always-ready/Prewarmed 설정 변경에 실패했습니다 (expected=$expected)." >&2
+    return 1
+  fi
+  if ! settings=$(az rest --method get \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
+    --output json)
+  then
+    echo "Always-ready/Prewarmed 설정 read-back에 실패했습니다." >&2
+    return 1
+  fi
+  if ! jq -e --argjson expected "$expected" \
+    '(.alwaysReady == 1 and .prewarmed == $expected)' >/dev/null <<< "$settings"
+  then
+    echo "Always-ready/Prewarmed 설정 read-back이 예상과 다릅니다: $settings" >&2
+    return 1
+  fi
+}
+
 enable_autoscale() {
   if ! az rest --method patch \
     --uri "${PLAN_ID}?api-version=2024-11-01" \
@@ -138,12 +182,12 @@ enable_autoscale() {
     echo "Plan PATCH에 실패했습니다. Web App PATCH는 실행하지 않았습니다. Cloud Shell은 유지한 채 1단계를 다시 실행해 plan/app ID를 다시 확인한 뒤 재시도하세요." >&2
     return 1
   fi
+  if ! verify_plan_configuration; then
+    echo "Plan PATCH 후 read-back 검증에 실패했습니다. Web App PATCH는 실행하지 않았습니다. Cloud Shell은 유지한 채 1단계를 다시 실행하지 말고 원인을 확인하세요." >&2
+    return 1
+  fi
 
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-    --output none
-  then
+  if ! set_prewarmed_configuration 1; then
     echo "Plan PATCH는 적용됐지만 Web App PATCH에 실패했습니다. Cloud Shell은 유지한 채 1단계를 다시 실행해 Web App 설정을 완료하세요." >&2
     return 1
   fi
@@ -215,7 +259,7 @@ Usage: hey [options...] <url>
 
 이번 모듈의 관찰 포인트는 “어느 시험이 더 빨랐는가”가 아니라 **새 instance가 시작된 뒤 실제 응답에 처음 보일 때까지 어떤 타임라인이 관찰되는가**입니다. 먼저 `STARTUP_DELAY_SECONDS=20`으로 새 프로세스의 시작 준비 시간을 키우고, 동일한 burst 부하에서 `Prewarmed=0`과 `Prewarmed=1`의 관찰 결과를 같은 형식으로 기록합니다.
 
-`started_at`은 20초 시작 지연 전에 기록됩니다. 따라서 `first_response_age`가 약 20초라면 시작 준비 직후 응답에 투입된 것이고, 그보다 길면 준비를 마친 뒤 실제 응답 전에 대기한 구간이 있었음을 뜻합니다. 이 값은 플랫폼 내부의 active/prewarmed 라벨을 직접 조회한 것이 아니라 앱이 관찰한 외부 증거입니다.
+`started_at`은 20초 시작 지연 전에 기록됩니다. 따라서 `first_response_age`가 약 20초라면 시작 준비 직후 응답에 투입된 것이고, 그보다 길면 준비를 마친 뒤 실제 응답 전에 대기한 구간이 있었음을 뜻합니다. `first_seen_at`은 클라이언트 observer가 그 instance의 응답을 처음 받은 시각이지, 플랫폼 내부 라우팅이 실제로 시작된 정확한 시각은 아닙니다. 이 값은 플랫폼 내부의 active/prewarmed 라벨을 직접 조회한 것이 아니라 앱이 관찰한 외부 증거입니다.
 
 🟢 **실행 — 기준 상태 확인과 A/B 관찰용 헬퍼 정의**
 
@@ -301,14 +345,19 @@ prepare_startup_delay() {
     echo "시작 지연 준비 단계의 /health 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
     return 1
   fi
+  if ! verify_plan_configuration; then
+    if ! restore_autoscale_defaults; then
+      echo "Plan 설정 read-back 실패 후 복원에도 실패했습니다. 4단계로 진행하지 마세요." >&2
+    else
+      echo "Plan 설정 read-back이 실패했습니다. 복원 helper가 끝났으므로 4단계로 진행하지 마세요." >&2
+    fi
+    return 1
+  fi
 }
 
 restore_autoscale_defaults() {
   local status=0 settings startup_count
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-    --output none; then
+  if ! set_prewarmed_configuration 1; then
     status=1
   fi
   if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
@@ -339,11 +388,49 @@ restore_autoscale_defaults() {
   return "$status"
 }
 
+HEY_PID=""
+HEY_FAILURE=0
+DEMO_MUTATION_ACTIVE=1
+CLEANUP_RUNNING=0
+
+stop_tracked_hey() {
+  local pid=$HEY_PID
+  [ -n "$pid" ] || return 0
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+  HEY_PID=""
+}
+
+cleanup_demo() {
+  local exit_code=${1:-$?}
+  local cleanup_status=0
+  if [ "$CLEANUP_RUNNING" = "1" ]; then
+    return "$exit_code"
+  fi
+  CLEANUP_RUNNING=1
+  trap - EXIT INT TERM
+  stop_tracked_hey
+  if [ "$DEMO_MUTATION_ACTIVE" = "1" ] && ! restore_autoscale_defaults; then
+    cleanup_status=1
+  fi
+  if [ "$cleanup_status" -ne 0 ] && [ "$exit_code" -eq 0 ]; then
+    exit_code=1
+  fi
+  exit "$exit_code"
+}
+
+trap cleanup_demo EXIT
+trap 'cleanup_demo 130' INT
+trap 'cleanup_demo 143' TERM
+
 run_instance_age_trial() {
   local label=$1
   local observation_file=$2
   local hey_output=$3
-  local baseline_instance observer_status=0
+  local baseline_instance observer_status=0 hey_status=0
+  HEY_FAILURE=0
 
   if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
@@ -369,10 +456,64 @@ run_instance_age_trial() {
     observer_status=$?
   fi
 
-  wait "$HEY_PID" || true
+  if [ "$observer_status" -ne 0 ]; then
+    stop_tracked_hey
+    return "$observer_status"
+  fi
+  if wait "$HEY_PID"; then
+    hey_status=0
+  else
+    hey_status=$?
+  fi
   HEY_PID=""
-  return "$observer_status"
+  if [ "$hey_status" -ne 0 ]; then
+    HEY_FAILURE=1
+    echo "$label hey 부하가 실패했습니다 (exit=$hey_status)." >&2
+  fi
+  return "$hey_status"
 }
+
+handle_trial_observation() {
+  local label=$1
+  local observation_file=$2
+  local observer_status=$3
+  local message
+
+  if [ "$HEY_FAILURE" = "1" ]; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 ${label} hey 부하가 실패했고 복원에도 실패했습니다. 다음 단계를 실행하지 마세요." >&2
+    else
+      echo "시험 ${label} hey 부하가 실패했습니다. 복원 및 검증 후 시험을 중단하세요." >&2
+    fi
+    return 1
+  fi
+
+  case "$observer_status" in
+    0)
+      if jq -e 'type == "array" and length > 0' "$observation_file" >/dev/null 2>&1; then
+        return 0
+      fi
+      message="유효한 JSON 배열을 남기지 못했습니다."
+      ;;
+    1)
+      message="관찰 도구가 오류로 종료했습니다."
+      ;;
+    2)
+      message="새 instance를 관찰하지 못했습니다."
+      ;;
+    *)
+      message="관찰 도구가 예상하지 못한 상태($observer_status)로 종료했습니다."
+      ;;
+  esac
+
+  if ! restore_autoscale_defaults; then
+    echo "시험 ${label} ${message} 복원에도 실패했습니다. 다음 단계를 실행하지 마세요." >&2
+  else
+    echo "시험 ${label} ${message} Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 검증했습니다. Cloud Shell은 유지한 채 부하를 다시 걸어 3단계부터 재실행하세요." >&2
+  fi
+  return 1
+}
+
 ```
 
 > 👁️ `InstanceCount` 메트릭은 **시험 시작 전·시험 사이의 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 관찰값은 `observe_instances.py`가 수집한 새 instance의 `started_at`, `first_seen_at`, `first_response_age`입니다.
@@ -405,11 +546,7 @@ prepare_startup_delay
 run_trial_a() {
   local observer_status=0
 
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
-    --output none
-  then
+  if ! set_prewarmed_configuration 0; then
     if ! restore_autoscale_defaults; then
       echo "시험 A 설정 변경에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
     else
@@ -441,23 +578,7 @@ run_trial_a() {
     observer_status=$?
   fi
 
-  if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$NO_PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 A에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 실행하지 마세요." >&2
-    else
-      echo "시험 A에서 새 instance를 관찰하지 못했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 부하를 다시 걸어 3단계부터 재실행하세요." >&2
-    fi
-    return 1
-  fi
-
-  if [ "$observer_status" -ne 0 ]; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 A 관찰 도구가 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 실행하지 마세요." >&2
-    else
-      echo "시험 A 관찰 도구가 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
-    fi
-    return 1
-  fi
+  handle_trial_observation "A" "$NO_PREWARM_OBSERVATIONS" "$observer_status"
 }
 
 run_trial_a
@@ -497,11 +618,7 @@ run_trial_b() {
     return 1
   fi
 
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-    --output none
-  then
+  if ! set_prewarmed_configuration 1; then
     if ! restore_autoscale_defaults; then
       echo "시험 B 설정 변경에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 이 시험을 다시 시작하지 마세요." >&2
     else
@@ -532,23 +649,7 @@ run_trial_b() {
     observer_status=$?
   fi
 
-  if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 B에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 다음 단계로 진행하지 마세요." >&2
-    else
-      echo "시험 B에서 새 instance를 관찰하지 못했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 부하를 다시 걸어 3단계부터 재실행하세요." >&2
-    fi
-    return 1
-  fi
-
-  if [ "$observer_status" -ne 0 ]; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 B 관찰 도구가 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 다음 단계로 진행하지 마세요." >&2
-    else
-      echo "시험 B 관찰 도구가 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
-    fi
-    return 1
-  fi
+  handle_trial_observation "B" "$PREWARM_OBSERVATIONS" "$observer_status"
 }
 
 run_trial_b
@@ -612,6 +713,8 @@ restore_module_defaults() {
     echo "복원에 실패했습니다. 설정과 /health를 다시 확인한 뒤 다음 모듈로 진행하지 마세요." >&2
     return 1
   fi
+  DEMO_MUTATION_ACTIVE=0
+  trap - EXIT INT TERM
 }
 
 restore_module_defaults

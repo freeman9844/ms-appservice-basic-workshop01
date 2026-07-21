@@ -34,6 +34,7 @@ def test_parse_sample_rejects_invalid_payloads():
 
     assert oi.parse_sample({}, observed) is None
     assert oi.parse_sample({"instance": "", "started_at": "2026-07-21T02:00:00Z"}, observed) is None
+    assert oi.parse_sample({"instance": " \t", "started_at": "2026-07-21T02:00:00Z"}, observed) is None
     assert oi.parse_sample({"instance": None, "started_at": "2026-07-21T02:00:00Z"}, observed) is None
     assert oi.parse_sample({"instance": "worker02", "started_at": "not-a-time"}, observed) is None
 
@@ -160,6 +161,26 @@ def test_main_returns_0_1_and_2(monkeypatch, tmp_path, capsys):
         == 1
     )
     assert "must be positive" in capsys.readouterr().err
+    assert (
+        oi.main(
+            [
+                "--url",
+                "http://example.invalid/api/info",
+                "--baseline-instance",
+                " \t",
+                "--duration",
+                "1",
+                "--concurrency",
+                "1",
+                "--request-timeout",
+                "1",
+                "--output",
+                str(output),
+            ]
+        )
+        == 1
+    )
+    assert "baseline-instance must not be empty or whitespace" in capsys.readouterr().err
 
     rehearsal = (ROOT / "scripts/rehearsal.sh").read_text(encoding="utf-8")
     docs = (ROOT / "docs/07-autoscale.md").read_text(encoding="utf-8")
@@ -180,8 +201,11 @@ class _FakeFuture:
     def __init__(self, value):
         self._value = value
 
-    def result(self):
+    def result(self, timeout=None):
         return self._value
+
+    def cancel(self):
+        return False
 
 
 class _FakeExecutor:
@@ -189,15 +213,12 @@ class _FakeExecutor:
         self.max_workers = max_workers
         self.submitted = []
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
     def submit(self, fn, url, timeout):
         self.submitted.append((url, timeout))
         return _FakeFuture(fn(url, timeout))
+
+    def shutdown(self, wait=True, cancel_futures=False):
+        self.shutdown_args = (wait, cancel_futures)
 
 
 def test_observe_stops_when_deadline_is_reached(monkeypatch):
@@ -208,11 +229,11 @@ def test_observe_stops_when_deadline_is_reached(monkeypatch):
             {"instance": "worker03", "started_at": "2026-07-21T02:00:00Z"},
         ]
     )
-    monotonic_values = iter([0.0, 0.0, 0.0, 1.1, 1.2, 1.3, 1.4])
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.1, 1.1, 1.2, 1.3])
     sleep_calls = []
 
     monkeypatch.setattr(oi, "ThreadPoolExecutor", lambda max_workers: executor)
-    monkeypatch.setattr(oi, "as_completed", lambda futures: list(futures))
+    monkeypatch.setattr(oi, "as_completed", lambda futures, timeout=None: list(futures))
     monkeypatch.setattr(oi.time, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(oi.time, "sleep", lambda value: sleep_calls.append(value))
     monkeypatch.setattr(
@@ -246,4 +267,51 @@ def test_observe_stops_when_deadline_is_reached(monkeypatch):
         ("http://example.invalid/api/info", 1),
         ("http://example.invalid/api/info", 1),
     ]
-    assert sleep_calls == [0]
+    assert sleep_calls == []
+    assert executor.shutdown_args == (False, True)
+
+
+def test_fetch_ignores_transport_oserror(monkeypatch):
+    def fail(*args, **kwargs):
+        raise ConnectionResetError("connection reset")
+
+    monkeypatch.setattr(oi, "urlopen", fail)
+
+    assert oi.fetch("http://example.invalid", 1) is None
+
+
+class _BlockedFuture:
+    def __init__(self):
+        self.cancelled = False
+
+    def result(self, timeout=None):
+        raise TimeoutError
+
+    def cancel(self):
+        self.cancelled = True
+        return True
+
+
+class _BlockedExecutor:
+    def __init__(self, max_workers):
+        self.future = _BlockedFuture()
+        self.shutdown_args = None
+
+    def submit(self, fn, url, timeout):
+        return self.future
+
+    def shutdown(self, wait=True, cancel_futures=False):
+        self.shutdown_args = (wait, cancel_futures)
+
+
+def test_observe_cancels_blocked_futures_without_waiting(monkeypatch):
+    executor = _BlockedExecutor(max_workers=1)
+    clock = iter([0.0, 0.0, 0.0, 2.0, 2.0])
+
+    monkeypatch.setattr(oi, "ThreadPoolExecutor", lambda max_workers: executor)
+    monkeypatch.setattr(oi, "as_completed", lambda futures, timeout=None: (_ for _ in ()).throw(TimeoutError))
+    monkeypatch.setattr(oi.time, "monotonic", lambda: next(clock))
+
+    assert oi.observe("http://example.invalid", "baseline", 1, 1, 5) == []
+    assert executor.future.cancelled is True
+    assert executor.shutdown_args == (False, True)

@@ -3,6 +3,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +27,7 @@ def parse_sample(payload, observed_at):
         return None
     instance = payload.get("instance")
     started_at = payload.get("started_at")
-    if not isinstance(instance, str) or not instance:
+    if not isinstance(instance, str) or not instance.strip():
         return None
     if not isinstance(started_at, str) or not started_at:
         return None
@@ -72,31 +73,48 @@ def fetch(url, timeout):
                 return json.load(response)
             except (OSError, UnicodeDecodeError, ValueError):
                 return None
-    except (HTTPError, URLError, TimeoutError):
+    except (HTTPError, URLError, OSError, TimeoutError):
         return None
 
 
 def observe(url, baseline_instance, duration, concurrency, request_timeout):
     deadline = time.monotonic() + duration
     store = ObservationStore(baseline_instance)
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+    pool = ThreadPoolExecutor(max_workers=concurrency)
+    try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             timeout = min(request_timeout, remaining)
             futures = [pool.submit(fetch, url, timeout) for _ in range(concurrency)]
-            for future in as_completed(futures):
-                if time.monotonic() >= deadline:
-                    break
-                sample = parse_sample(future.result(), datetime.now(timezone.utc))
-                if store.add(sample):
-                    print(
-                        f"{sample['instance']}\t{sample['started_at']}\t"
-                        f"{sample['first_seen_at']}\t{sample['first_response_age']}",
-                        flush=True,
-                    )
-            time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+            try:
+                completed_timeout = max(0, deadline - time.monotonic())
+                for future in as_completed(futures, timeout=completed_timeout):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    try:
+                        payload = future.result(timeout=remaining)
+                    except Exception:
+                        continue
+                    sample = parse_sample(payload, datetime.now(timezone.utc))
+                    if store.add(sample):
+                        print(
+                            f"{sample['instance']}\t{sample['started_at']}\t"
+                            f"{sample['first_seen_at']}\t{sample['first_response_age']}",
+                            flush=True,
+                        )
+            except FutureTimeoutError:
+                pass
+            finally:
+                for future in futures:
+                    future.cancel()
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.2, remaining))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     return store.values()
 
 
@@ -114,6 +132,9 @@ def main(argv=None):
         return 1 if getattr(error, "code", 1) else 0
     if args.duration <= 0 or args.concurrency <= 0 or args.request_timeout <= 0:
         print("duration, concurrency, and request-timeout must be positive", file=sys.stderr)
+        return 1
+    if not args.baseline_instance.strip():
+        print("baseline-instance must not be empty or whitespace", file=sys.stderr)
         return 1
 
     print("instance\tstarted_at\tfirst_seen_at\tfirst_response_age", flush=True)

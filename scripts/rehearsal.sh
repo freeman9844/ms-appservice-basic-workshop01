@@ -15,8 +15,19 @@ mkdir -p "$TMP_DIR"
 CLIENT_ID=""
 APP_ID=""
 HEY_PID=""
+HEY_FAILURE=0
 PREWARMED_RESTORE_NEEDED=0
 CLEANUP_RUNNING=0
+
+stop_tracked_hey() {
+  local pid=$HEY_PID
+  [ -n "$pid" ] || return 0
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+  HEY_PID=""
+}
 
 cleanup() {
   local exit_code=$?
@@ -26,11 +37,7 @@ cleanup() {
   fi
   CLEANUP_RUNNING=1
   if [ -n "$HEY_PID" ]; then
-    if ! kill "$HEY_PID" 2>/dev/null && kill -0 "$HEY_PID" 2>/dev/null; then
-      cleanup_status=1
-    fi
-    wait "$HEY_PID" 2>/dev/null || true
-    HEY_PID=""
+    stop_tracked_hey || cleanup_status=1
   fi
   if [ "$PREWARMED_RESTORE_NEEDED" = "1" ] && [ -n "$APP_ID" ]; then
     restore_prewarmed_demo || cleanup_status=1
@@ -122,8 +129,7 @@ PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 az rest --method patch --uri "${PLAN_ID}?api-version=2024-11-01" \
   --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' -o none
-az rest --method patch --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' -o none
+PREWARMED_RESTORE_NEEDED=1
 export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
 command -v hey >/dev/null || {
   go install github.com/rakyll/hey@latest
@@ -190,13 +196,54 @@ wait_for_health() {
   return 1
 }
 
+verify_plan_configuration() {
+  local settings
+  if ! settings=$(az rest --method get \
+    --uri "${PLAN_ID}?api-version=2024-11-01" \
+    --query "properties.{elasticScaleEnabled:elasticScaleEnabled,maximumElasticWorkerCount:maximumElasticWorkerCount}" \
+    -o json)
+  then
+    echo "[07] Plan 설정 read-back에 실패했습니다." >&2
+    return 1
+  fi
+  if ! jq -e '(.elasticScaleEnabled == true and .maximumElasticWorkerCount == 5)' \
+    >/dev/null <<< "$settings"
+  then
+    echo "[07] Plan 설정 read-back이 예상과 다릅니다: $settings" >&2
+    return 1
+  fi
+}
+
+set_prewarmed_configuration() {
+  local expected=$1 settings
+  if ! az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body "{\"properties\":{\"minimumElasticInstanceCount\":1,\"preWarmedInstanceCount\":${expected}}}" \
+    -o none
+  then
+    echo "[07] Always-ready/Prewarmed 설정 변경에 실패했습니다 (expected=$expected)." >&2
+    return 1
+  fi
+  if ! settings=$(az rest --method get \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
+    -o json)
+  then
+    echo "[07] Always-ready/Prewarmed 설정 read-back에 실패했습니다." >&2
+    return 1
+  fi
+  if ! jq -e --argjson expected "$expected" \
+    '(.alwaysReady == 1 and .prewarmed == $expected)' >/dev/null <<< "$settings"
+  then
+    echo "[07] Always-ready/Prewarmed 설정 read-back이 예상과 다릅니다: $settings" >&2
+    return 1
+  fi
+}
+
 restore_prewarmed_demo() {
   local status=0 settings startup_count
   [ -n "$APP_ID" ] || return 0
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-    -o none; then
+  if ! set_prewarmed_configuration 1; then
     status=1
   fi
   if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
@@ -235,7 +282,8 @@ run_instance_age_trial() {
   local label=$1
   local observation_file=$2
   local hey_output=$3
-  local baseline_instance observer_status=0
+  local baseline_instance observer_status=0 hey_status=0
+  HEY_FAILURE=0
 
   if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
@@ -261,15 +309,35 @@ run_instance_age_trial() {
     observer_status=$?
   fi
 
-  wait "$HEY_PID" || true
+  if [ "$observer_status" -ne 0 ]; then
+    stop_tracked_hey
+    return "$observer_status"
+  fi
+  if wait "$HEY_PID"; then
+    hey_status=0
+  else
+    hey_status=$?
+  fi
   HEY_PID=""
-  return "$observer_status"
+  if [ "$hey_status" -ne 0 ]; then
+    HEY_FAILURE=1
+    echo "$label hey 부하가 실패했습니다 (exit=$hey_status)." >&2
+  fi
+  return "$hey_status"
 }
 
 handle_trial_observations() {
   local label=$1
   local observation_file=$2
   local observer_status=$3
+
+  if [ "$HEY_FAILURE" = "1" ]; then
+    if ! restore_prewarmed_demo; then
+      echo "[07] ${label} hey 부하가 실패했고 복원에도 실패했습니다." >&2
+    fi
+    echo "[07] ${label} hey 부하가 실패했습니다. 복원 및 검증 후 시험을 중단합니다." >&2
+    return 1
+  fi
 
   case "$observer_status" in
     0)
@@ -307,6 +375,13 @@ handle_trial_observations() {
 }
 
 PREWARMED_RESTORE_NEEDED=1
+if ! set_prewarmed_configuration 1; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 초기 Always-ready/Prewarmed 설정 변경 및 복원에 실패했습니다." >&2
+  fi
+  echo "[07] 초기 Always-ready/Prewarmed 설정 변경에 실패했습니다." >&2
+  exit 1
+fi
 if ! az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 -o none
 then
@@ -329,13 +404,18 @@ if ! wait_for_health; then
   exit 1
 fi
 
+if ! verify_plan_configuration; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] Plan 설정 read-back 실패 후 복원에도 실패했습니다." >&2
+  fi
+  echo "[07] Plan 설정 read-back이 실패했으므로 시험을 중단합니다." >&2
+  exit 1
+fi
+
 NO_PREWARM_OBSERVATIONS="$TMP_DIR/prewarmed-0-observations.json"
 PREWARM_OBSERVATIONS="$TMP_DIR/prewarmed-1-observations.json"
 
-if ! az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
-  -o none
+if ! set_prewarmed_configuration 0
 then
   if ! restore_prewarmed_demo; then
     echo "[07] 시험 A 설정 변경 후 복원에 실패했습니다." >&2
@@ -378,10 +458,7 @@ if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
   exit 1
 fi
 
-if ! az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  -o none
+if ! set_prewarmed_configuration 1
 then
   if ! restore_prewarmed_demo; then
     echo "[07] 시험 B 설정 변경 후 복원에 실패했습니다." >&2
