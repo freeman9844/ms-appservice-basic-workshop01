@@ -176,27 +176,6 @@ wait_for_single_instance() {
   return 1
 }
 
-wait_for_buffer_allocation() {
-  local transition_at=$1
-  local transition_epoch sample_epoch samples timestamp count
-  transition_epoch=$(date -d "$transition_at" +%s)
-  for attempt in $(seq 1 20); do
-    if samples=$(latest_instance_count "$transition_at" 2>/dev/null); then
-      while IFS=$'\t' read -r timestamp count; do
-        [ -n "$timestamp" ] || continue
-        sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
-        [ "$sample_epoch" -gt "$transition_epoch" ] || continue
-        echo "Prewarmed buffer signal: InstanceCount=$count timestamp=$timestamp"
-        [ "$count" -ge 2 ] && return 0
-      done <<< "$samples"
-    else
-      echo "Prewarmed buffer signal: InstanceCount=missing"
-    fi
-    sleep 30
-  done
-  return 1
-}
-
 wait_for_health() {
   local body
   for attempt in $(seq 1 18); do
@@ -252,56 +231,53 @@ restore_prewarmed_demo() {
   return 1
 }
 
-measure_scale_out() {
+run_instance_age_trial() {
   local label=$1
-  local output_file=$2
-  local result_var=$3
-  local started elapsed unique_instances deadline now remaining curl_timeout instance_id
+  local observation_file=$2
+  local hey_output=$3
+  local baseline_instance observer_status=0
 
-  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
+  if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
+    jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
+  then
+    echo "$label 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
+    return 1
+  fi
+
+  echo "$label 기준 instance: $baseline_instance"
+  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$hey_output" &
   HEY_PID=$!
-  started=$(date +%s)
-  deadline=$((started + 180))
-  printf -v "$result_var" '%s' timeout
 
-  for attempt in $(seq 1 36); do
-    [ "$(date +%s)" -lt "$deadline" ] || break
-    unique_instances=$(
-      for i in $(seq 1 30); do
-        now=$(date +%s)
-        remaining=$((deadline - now))
-        [ "$remaining" -gt 0 ] || break
-        curl_timeout=5
-        [ "$remaining" -lt "$curl_timeout" ] && curl_timeout=$remaining
-        instance_id=$(
-          curl --fail --silent --show-error --max-time "$curl_timeout" "$APP_URL/api/info" 2>/dev/null |
-          jq -er 'if ((.instance? | type) == "string" and (.instance | length) > 0) then .instance else empty end' 2>/dev/null ||
-          true
-        )
-        now=$(date +%s)
-        [ "$now" -lt "$deadline" ] || break
-        if [ -n "$instance_id" ]; then
-          printf '%s\n' "$instance_id"
-        fi
-      done | sort -u | awk 'length($0) > 0' | wc -l
-    )
-    elapsed=$(( $(date +%s) - started ))
-    echo "$label: ${elapsed}초, 응답 인스턴스 ${unique_instances}개"
-    if [ "$unique_instances" -ge 2 ]; then
-      printf -v "$result_var" '%s' "$elapsed"
-      break
-    fi
-    sleep 5
-  done
+  if python3 "$REPO_DIR/scripts/observe_instances.py" \
+    --url "$APP_URL/api/info" \
+    --baseline-instance "$baseline_instance" \
+    --duration 180 \
+    --concurrency 30 \
+    --request-timeout 5 \
+    --output "$observation_file"
+  then
+    observer_status=0
+  else
+    observer_status=$?
+  fi
 
-  kill "$HEY_PID" 2>/dev/null || true
-  wait "$HEY_PID" 2>/dev/null || true
+  wait "$HEY_PID" || true
   HEY_PID=""
+  return "$observer_status"
 }
 
 PREWARMED_RESTORE_NEEDED=1
-az webapp config appsettings set -g "$RG" -n "$APP" \
+if ! az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 -o none
+then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시작 지연 준비 단계의 복원 및 검증에 실패했습니다." >&2
+  else
+    echo "[07] 시작 지연 준비 단계의 복원 및 검증을 완료했습니다." >&2
+  fi
+  echo "[07] 시작 지연 설정에 실패했습니다." >&2
+  exit 1
+fi
 
 if ! wait_for_health; then
   if ! restore_prewarmed_demo; then
@@ -313,10 +289,22 @@ if ! wait_for_health; then
   exit 1
 fi
 
-az rest --method patch \
+NO_PREWARM_OBSERVATIONS="$TMP_DIR/prewarmed-0-observations.json"
+PREWARM_OBSERVATIONS="$TMP_DIR/prewarmed-1-observations.json"
+
+if ! az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
   -o none
+then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 A 설정 변경 후 복원에 실패했습니다." >&2
+  else
+    echo "[07] 시험 A 설정 변경 후 복원 및 검증을 완료했습니다." >&2
+  fi
+  echo "[07] 시험 A 설정 변경에 실패했습니다." >&2
+  exit 1
+fi
 A_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 if ! wait_for_single_instance "$A_TRANSITION_AT"; then
@@ -327,14 +315,24 @@ if ! wait_for_single_instance "$A_TRANSITION_AT"; then
   exit 1
 fi
 
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prime-0.out"
-measure_scale_out "Prewarmed=0" "$TMP_DIR/hey-burst-0.out" NO_PREWARM_SECONDS
-echo "Prewarmed=0: $NO_PREWARM_SECONDS"
-if [[ ! "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+observer_status=0
+if run_instance_age_trial "Prewarmed=0" "$NO_PREWARM_OBSERVATIONS" "$TMP_DIR/hey-burst-0.out"; then
+  observer_status=0
+else
+  observer_status=$?
+fi
+if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$NO_PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
   if ! restore_prewarmed_demo; then
-    echo "[07] 시험 A timeout 후 복원에 실패했습니다." >&2
+    echo "[07] 시험 A에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다." >&2
   fi
-  echo "[07] 시험 A가 timeout되어 시험 B를 실행하지 않습니다." >&2
+  echo "[07] 시험 A에서 새 instance를 관찰하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다. 부하를 다시 걸어 3단계부터 재실행하세요." >&2
+  exit 1
+fi
+if [ "$observer_status" -ne 0 ]; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 A 관찰 도구 실패 후 복원에 실패했습니다." >&2
+  fi
+  echo "[07] 시험 A 관찰 도구가 실패했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
   exit 1
 fi
 
@@ -349,37 +347,55 @@ if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
   exit 1
 fi
 
-az rest --method patch \
+if ! az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
   -o none
+then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 B 설정 변경 후 복원에 실패했습니다." >&2
+  else
+    echo "[07] 시험 B 설정 변경 후 복원 및 검증을 완료했습니다." >&2
+  fi
+  echo "[07] 시험 B 설정 변경에 실패했습니다." >&2
+  exit 1
+fi
 B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$TMP_DIR/hey-prime-1.out"
-if ! wait_for_buffer_allocation "$B_TRANSITION_AT"; then
+if ! wait_for_single_instance "$B_TRANSITION_AT"; then
   if ! restore_prewarmed_demo; then
-    echo "[07] 시험 B Prewarmed 버퍼 확인 후 복원에 실패했습니다." >&2
+    echo "[07] 시험 B 기준 상태 복원에 실패했습니다." >&2
   fi
-  echo "[07] 시험 B에서 설정 변경 후 신선한 InstanceCount>=2 버퍼 할당 신호를 확인하지 못했습니다." >&2
+  echo "[07] 시험 B 시작 전 기준 상태를 확보하지 못했습니다." >&2
   exit 1
 fi
-measure_scale_out "Prewarmed=1" "$TMP_DIR/hey-burst-1.out" PREWARM_SECONDS
-echo "Prewarmed=1: $PREWARM_SECONDS"
-
-if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
-  echo "Prewarmed=0 : ${NO_PREWARM_SECONDS}초"
-  echo "Prewarmed=1 : ${PREWARM_SECONDS}초"
-  echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
+observer_status=0
+if run_instance_age_trial "Prewarmed=1" "$PREWARM_OBSERVATIONS" "$TMP_DIR/hey-burst-1.out"; then
+  observer_status=0
 else
-  echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
+  observer_status=$?
+fi
+if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
   if ! restore_prewarmed_demo; then
-    echo "[07] timeout 후 복원 및 검증에 실패했습니다." >&2
-  else
-    echo "[07] timeout 후 복원 및 검증을 완료했습니다." >&2
+    echo "[07] 시험 B에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다." >&2
   fi
-  echo "[07] 시험이 timeout되어 중단합니다." >&2
+  echo "[07] 시험 B에서 새 instance를 관찰하지 못했습니다. Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 시도했습니다. 부하를 다시 걸어 3단계부터 재실행하세요." >&2
   exit 1
 fi
+if [ "$observer_status" -ne 0 ]; then
+  if ! restore_prewarmed_demo; then
+    echo "[07] 시험 B 관찰 도구 실패 후 복원에 실패했습니다." >&2
+  fi
+  echo "[07] 시험 B 관찰 도구가 실패했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
+  exit 1
+fi
+
+printf 'trial\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age\n'
+jq -r '.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv' \
+  "$NO_PREWARM_OBSERVATIONS"
+jq -r '.[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv' \
+  "$PREWARM_OBSERVATIONS"
+echo "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 
 if ! restore_prewarmed_demo; then
   echo "[07] 복원에 실패했습니다. 이후 단계로 진행하지 않습니다." >&2
