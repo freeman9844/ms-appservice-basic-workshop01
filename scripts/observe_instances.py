@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import multiprocessing
 import sys
 import time
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -9,6 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
+
+
+HARD_DEADLINE_GRACE = 0.25
+PROCESS_REAP_GRACE = 0.2
 
 
 def _utc(value):
@@ -77,7 +82,7 @@ def fetch(url, timeout):
         return None
 
 
-def observe(url, baseline_instance, duration, concurrency, request_timeout):
+def _observe_threaded(url, baseline_instance, duration, concurrency, request_timeout):
     deadline = time.monotonic() + duration
     store = ObservationStore(baseline_instance)
     pool = ThreadPoolExecutor(max_workers=concurrency)
@@ -118,6 +123,96 @@ def observe(url, baseline_instance, duration, concurrency, request_timeout):
     return store.values()
 
 
+class ObservationExecutionError(RuntimeError):
+    pass
+
+
+def _observe_child(connection, url, baseline_instance, duration, concurrency, request_timeout):
+    try:
+        connection.send(
+            (
+                "ok",
+                _observe_threaded(
+                    url,
+                    baseline_instance,
+                    duration,
+                    concurrency,
+                    request_timeout,
+                ),
+            )
+        )
+    except BaseException as error:
+        try:
+            connection.send(("error", f"{type(error).__name__}: {error}"))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        connection.close()
+
+
+def _multiprocessing_context():
+    return multiprocessing.get_context("spawn")
+
+
+def _terminate_and_reap(process):
+    if process.is_alive():
+        process.terminate()
+        process.join(PROCESS_REAP_GRACE)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(PROCESS_REAP_GRACE)
+    if process.is_alive():
+        raise ObservationExecutionError("observation child could not be reaped")
+
+
+def observe(url, baseline_instance, duration, concurrency, request_timeout):
+    context = _multiprocessing_context()
+    parent_connection, child_connection = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_observe_child,
+        args=(
+            child_connection,
+            url,
+            baseline_instance,
+            duration,
+            concurrency,
+            request_timeout,
+        ),
+        daemon=True,
+    )
+    hard_deadline = time.monotonic() + duration + HARD_DEADLINE_GRACE
+    started = False
+    try:
+        try:
+            process.start()
+        except (OSError, RuntimeError) as error:
+            raise ObservationExecutionError(f"failed to start observation child: {error}") from error
+        started = True
+        child_connection.close()
+        remaining = max(0, hard_deadline - time.monotonic())
+        process.join(remaining)
+        if process.is_alive():
+            _terminate_and_reap(process)
+            raise ObservationExecutionError("observation exceeded its hard deadline")
+        if not parent_connection.poll(0):
+            raise ObservationExecutionError(
+                f"observation child exited without a result (exit={process.exitcode})"
+            )
+        status, payload = parent_connection.recv()
+        if status == "error":
+            raise ObservationExecutionError(payload)
+        return payload
+    finally:
+        if started:
+            if process.is_alive():
+                _terminate_and_reap(process)
+            else:
+                process.join()
+            process.close()
+        child_connection.close()
+        parent_connection.close()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
@@ -138,13 +233,17 @@ def main(argv=None):
         return 1
 
     print("instance\tstarted_at\tfirst_seen_at\tfirst_response_age", flush=True)
-    observations = observe(
-        args.url,
-        args.baseline_instance,
-        args.duration,
-        args.concurrency,
-        args.request_timeout,
-    )
+    try:
+        observations = observe(
+            args.url,
+            args.baseline_instance,
+            args.duration,
+            args.concurrency,
+            args.request_timeout,
+        )
+    except ObservationExecutionError as error:
+        print(f"observation failed: {error}", file=sys.stderr)
+        return 1
     try:
         args.output.write_text(json.dumps(observations, indent=2) + "\n", encoding="utf-8")
     except OSError as error:

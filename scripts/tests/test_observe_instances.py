@@ -1,6 +1,10 @@
 import json
+import multiprocessing
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 from scripts import observe_instances as oi
 
@@ -252,7 +256,7 @@ def test_observe_stops_when_deadline_is_reached(monkeypatch):
         },
     )
 
-    observations = oi.observe("http://example.invalid/api/info", "baseline", 1, 2, 5)
+    observations = oi._observe_threaded("http://example.invalid/api/info", "baseline", 1, 2, 5)
 
     assert observations == [
         {
@@ -312,6 +316,24 @@ def test_observe_cancels_blocked_futures_without_waiting(monkeypatch):
     monkeypatch.setattr(oi, "as_completed", lambda futures, timeout=None: (_ for _ in ()).throw(TimeoutError))
     monkeypatch.setattr(oi.time, "monotonic", lambda: next(clock))
 
-    assert oi.observe("http://example.invalid", "baseline", 1, 1, 5) == []
+    assert oi._observe_threaded("http://example.invalid", "baseline", 1, 1, 5) == []
     assert executor.future.cancelled is True
     assert executor.shutdown_args == (False, True)
+
+
+def _blocked_urlopen(url, timeout):
+    while True:
+        time.sleep(1)
+
+
+def test_observe_hard_deadline_reaps_blocked_child_and_worker(monkeypatch):
+    monkeypatch.setattr(oi, "urlopen", _blocked_urlopen)
+    monkeypatch.setattr(oi, "_multiprocessing_context", lambda: multiprocessing.get_context("fork"))
+    started_at = time.monotonic()
+
+    with pytest.raises(oi.ObservationExecutionError, match="hard deadline"):
+        oi.observe("http://example.invalid", "baseline", 0.1, 1, 30)
+
+    elapsed = time.monotonic() - started_at
+    assert elapsed < 1.5
+    assert not any(process.is_alive() for process in multiprocessing.active_children())

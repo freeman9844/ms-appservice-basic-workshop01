@@ -435,8 +435,8 @@ run_instance_age_trial() {
   if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
   then
-    echo "$label 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
-    return 1
+    echo "$label baseline ID acquisition failed: 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
+    return 3
   fi
 
   echo "$label 기준 instance: $baseline_instance"
@@ -501,6 +501,9 @@ handle_trial_observation() {
     2)
       message="새 instance를 관찰하지 못했습니다."
       ;;
+    3)
+      message="baseline ID acquisition failed."
+      ;;
     *)
       message="관찰 도구가 예상하지 못한 상태($observer_status)로 종료했습니다."
       ;;
@@ -519,6 +522,8 @@ handle_trial_observation() {
 > 👁️ `InstanceCount` 메트릭은 **시험 시작 전·시험 사이의 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 관찰값은 `observe_instances.py`가 수집한 새 instance의 `started_at`, `first_seen_at`, `first_response_age`입니다.
 
 > 👁️ `observe_instances.py`는 새 instance를 관찰할 때마다 표 한 줄을 출력하고, 종료 시 JSON 배열을 `--output`에 저장합니다. 새 instance를 관찰하면 0, 관찰하지 못하면 2로 종료합니다. `run_instance_age_trial`과 이후 호출부는 실패한 trial을 복원 + 재시도 안내와 함께 최종 종료 1로 정규화합니다.
+
+> ⚠️ 기준 instance ID를 얻지 못한 경우는 observer 실행 실패와 별개의 **baseline ID acquisition failed** 경로이며, 동일하게 설정을 복원하고 시험을 중단합니다.
 
 🟢 **실행 — 시작 지연 설정 및 앱 준비**
 

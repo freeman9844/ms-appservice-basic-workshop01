@@ -288,8 +288,8 @@ run_instance_age_trial() {
   if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
   then
-    echo "$label 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
-    return 1
+    echo "$label baseline ID acquisition failed: 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
+    return 3
   fi
 
   echo "$label 기준 instance: $baseline_instance"
@@ -355,6 +355,13 @@ handle_trial_observations() {
         echo "[07] ${label} 관찰 도구 실패 후 복원에 실패했습니다." >&2
       fi
       echo "[07] ${label} 관찰 도구가 실패했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
+      return 1
+      ;;
+    3)
+      if ! restore_prewarmed_demo; then
+        echo "[07] ${label} baseline ID acquisition failed 후 복원에 실패했습니다." >&2
+      fi
+      echo "[07] ${label} baseline ID acquisition failed. 복원 및 검증 후 3단계부터 다시 시도하세요." >&2
       return 1
       ;;
     2)

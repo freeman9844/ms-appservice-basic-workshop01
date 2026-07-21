@@ -26,6 +26,13 @@ def test_rehearsal_preserves_hey_failures_and_stops_tracked_pid():
     assert 'wait "$HEY_PID" || true' not in REHEARSAL
 
 
+def test_baseline_id_acquisition_is_distinct_from_observer_failure():
+    assert "baseline ID acquisition failed" in REHEARSAL
+    assert "return 3" in REHEARSAL
+    assert "baseline ID acquisition failed" in DOCS
+    assert 'message="baseline ID acquisition failed."' in DOCS
+
+
 def test_docs_include_learner_safe_cleanup_and_matching_status_mapping():
     assert "trap cleanup_demo EXIT" in DOCS
     assert "trap 'cleanup_demo 130' INT" in DOCS
