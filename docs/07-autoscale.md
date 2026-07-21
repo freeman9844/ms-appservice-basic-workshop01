@@ -6,12 +6,13 @@
 
 ## 목표
 
-이 모듈에서는 Azure App Service **Automatic scaling**(탄력 스케일)을 활성화하고, `hey` 부하 도구로 같은 앱에 순차적인 HTTP A/B 시험을 실행해 `Prewarmed instances`가 scale-out 지연을 얼마나 줄이는지 관찰합니다. 이후 부하가 사라진 뒤 다시 단일 인스턴스로 축소(scale-in)되는 기준 상태까지 확인합니다.
+이 모듈에서는 Azure App Service **Automatic scaling**(탄력 스케일)을 활성화하고, `hey` 부하와 `observe_instances.py`로 같은 앱의 새 instance가 **언제 시작되고 언제 실제 응답에 처음 투입되는지**를 관찰합니다. 단일 실행의 승패를 가르기보다 `Prewarmed=0`과 `Prewarmed=1`에서 보이는 외부 증거를 기록하고 해석합니다.
 
 - App Service 플랜을 Elastic scale 모드로 전환하고 최대 5 인스턴스로 설정합니다.
-- `STARTUP_DELAY_SECONDS=20`으로 앱 시작 지연을 의도적으로 키운 뒤, 같은 앱에서 `Prewarmed=0` 과 `Prewarmed=1`을 순차 비교합니다.
-- `InstanceCount` 메트릭으로 시험 전 단일 인스턴스 기준 상태를 확인합니다.
-- `/api/info` 응답의 실제 인스턴스 ID를 이용해 두 번째 인스턴스가 나타날 때까지 걸린 시간을 측정합니다.
+- `STARTUP_DELAY_SECONDS=20`으로 새 프로세스의 시작 준비 시간을 눈에 보이게 만듭니다.
+- `/api/info`의 `started_at`과 새 instance의 최초 관찰 시각으로 `first_response_age`를 계산합니다.
+- `Prewarmed=0`과 `Prewarmed=1`의 인스턴스별 시작·투입 타임라인을 비교하되, 한 번의 실행에서 어느 쪽이 반드시 더 빠르다고 판정하지 않습니다.
+- `InstanceCount` 메트릭으로 시험 전·시험 사이의 단일 인스턴스 기준 상태를 확인합니다.
 - 시험 사이와 종료 후 인스턴스가 다시 1개 기준 상태로 축소됨을 확인합니다.
 - **Automatic scaling** 방식과 **규칙 기반(Azure Monitor autoscale)** 방식의 개념 차이를 이해합니다.
 - **Always-ready instances**와 **Prewarmed instances**의 역할과 비용 차이를 이해합니다.
@@ -202,9 +203,11 @@ Usage: hey [options...] <url>
 
 ## 3단계 — Prewarmed A/B 비교 준비
 
-이번 모듈의 관찰 포인트는 “메트릭이 늘어났는가”가 아니라 **같은 앱에서 `Prewarmed=0` 과 `Prewarmed=1`이 실제 응답 인스턴스 분산 시점에 어떤 차이를 만드는가**입니다. 먼저 `STARTUP_DELAY_SECONDS=20`으로 새 인스턴스 시작 지연을 키우고, 재사용 가능한 헬퍼 함수로 두 시험을 같은 조건에서 실행합니다.
+이번 모듈의 관찰 포인트는 “어느 시험이 더 빨랐는가”가 아니라 **새 instance가 시작된 뒤 실제 응답에 처음 보일 때까지 어떤 타임라인이 관찰되는가**입니다. 먼저 `STARTUP_DELAY_SECONDS=20`으로 새 프로세스의 시작 준비 시간을 키우고, 동일한 burst 부하에서 `Prewarmed=0`과 `Prewarmed=1`의 관찰 결과를 같은 형식으로 기록합니다.
 
-🟢 **실행 — 기준 상태 확인과 A/B 측정용 헬퍼 정의**
+`started_at`은 20초 시작 지연 전에 기록됩니다. 따라서 `first_response_age`가 약 20초라면 시작 준비 직후 응답에 투입된 것이고, 그보다 길면 준비를 마친 뒤 실제 응답 전에 대기한 구간이 있었음을 뜻합니다. 이 값은 플랫폼 내부의 active/prewarmed 라벨을 직접 조회한 것이 아니라 앱이 관찰한 외부 증거입니다.
+
+🟢 **실행 — 기준 상태 확인과 A/B 관찰용 헬퍼 정의**
 
 ```bash
 latest_instance_count() {
@@ -235,7 +238,7 @@ wait_for_single_instance() {
       sleep 30
       continue
     fi
-    while IFS=$'\t' read -r timestamp count; do
+    while IFS=$'	' read -r timestamp count; do
       [ -n "$timestamp" ] || continue
       sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
       [ "$sample_epoch" -gt "$transition_epoch" ] || continue
@@ -249,27 +252,6 @@ wait_for_single_instance() {
       echo "InstanceCount=$count timestamp=$timestamp (${consecutive}/2)"
       [ "$consecutive" -ge 2 ] && return 0
     done <<< "$samples"
-    sleep 30
-  done
-  return 1
-}
-
-wait_for_buffer_allocation() {
-  local transition_at=$1
-  local transition_epoch sample_epoch samples timestamp count
-  transition_epoch=$(date -d "$transition_at" +%s)
-  for attempt in $(seq 1 20); do
-    if samples=$(latest_instance_count "$transition_at" 2>/dev/null); then
-      while IFS=$'\t' read -r timestamp count; do
-        [ -n "$timestamp" ] || continue
-        sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
-        [ "$sample_epoch" -gt "$transition_epoch" ] || continue
-        echo "Prewarmed buffer signal: InstanceCount=$count timestamp=$timestamp"
-        [ "$count" -ge 2 ] && return 0
-      done <<< "$samples"
-    else
-      echo "Prewarmed buffer signal: InstanceCount=missing"
-    fi
     sleep 30
   done
   return 1
@@ -347,58 +329,41 @@ restore_autoscale_defaults() {
   return "$status"
 }
 
-measure_scale_out() {
+run_instance_age_trial() {
   local label=$1
-  local output_file=$2
-  local result_var=$3
-  local started elapsed unique_instances deadline now remaining curl_timeout instance_id
+  local observation_file=$2
+  local hey_output=$3
+  local baseline_instance observer_status=0
 
-  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$output_file" &
-  local load_pid=$!
-  started=$(date +%s)
-  deadline=$((started + 180))
-  printf -v "$result_var" '%s' timeout
+  baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
+    jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
 
-  for attempt in $(seq 1 36); do
-    [ "$(date +%s)" -lt "$deadline" ] || break
-    unique_instances=$(
-      for i in $(seq 1 30); do
-        now=$(date +%s)
-        remaining=$((deadline - now))
-        [ "$remaining" -gt 0 ] || break
-        curl_timeout=5
-        [ "$remaining" -lt "$curl_timeout" ] && curl_timeout=$remaining
-        instance_id=$(
-          curl --fail --silent --show-error --max-time "$curl_timeout" "$APP_URL/api/info" 2>/dev/null |
-          jq -er 'if ((.instance? | type) == "string" and (.instance | length) > 0) then .instance else empty end' 2>/dev/null ||
-          true
-        )
-        now=$(date +%s)
-        [ "$now" -lt "$deadline" ] || break
-        if [ -n "$instance_id" ]; then
-          printf '%s\n' "$instance_id"
-        fi
-      done | sort -u | awk 'length($0) > 0' | wc -l
-    )
-    elapsed=$(( $(date +%s) - started ))
-    echo "$label: ${elapsed}초, 응답 인스턴스 ${unique_instances}개"
-    if [ "$unique_instances" -ge 2 ]; then
-      printf -v "$result_var" '%s' "$elapsed"
-      break
-    fi
-    sleep 5
-  done
+  echo "$label 기준 instance: $baseline_instance"
+  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$hey_output" &
+  HEY_PID=$!
 
-  kill "$load_pid" 2>/dev/null || true
-  wait "$load_pid" 2>/dev/null || true
+  if python3 ../scripts/observe_instances.py \
+    --url "$APP_URL/api/info" \
+    --baseline-instance "$baseline_instance" \
+    --duration 180 \
+    --concurrency 30 \
+    --request-timeout 5 \
+    --output "$observation_file"
+  then
+    observer_status=0
+  else
+    observer_status=$?
+  fi
+
+  wait "$HEY_PID" || true
+  HEY_PID=""
+  return "$observer_status"
 }
 ```
 
-> 👁️ 각 `curl` 전마다 남은 시간을 다시 계산하고, deadline을 지난 응답은 집계하지 않습니다. 따라서 30회 배치가 180초를 넘기더라도 마감 이후 샘플은 인정되지 않습니다.
+> 👁️ `InstanceCount` 메트릭은 **시험 시작 전·시험 사이의 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 관찰값은 `observe_instances.py`가 수집한 새 instance의 `started_at`, `first_seen_at`, `first_response_age`입니다.
 
-> 👁️ 여기서 `InstanceCount` 메트릭은 **시험 시작 전 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 측정 결과는 `/api/info`가 돌려주는 **응답 인스턴스 ID가 2종류 이상으로 보이기까지 걸린 시간**입니다.
->
-> `wait_for_single_instance`는 설정 변경 시각 이후의 타임스탬프가 있는 메트릭만 읽고, 서로 다른 시각의 `InstanceCount=1` 샘플이 **연속 두 번** 관찰될 때만 기준 상태로 인정합니다. 따라서 이전 시험의 `1` 값만으로 새 시험이 시작되지 않습니다. Azure Portal에서는 같은 메트릭을 **Automatic Scaling Instance Count**로 볼 수 있습니다.
+> 👁️ `observe_instances.py`는 새 instance를 관찰할 때마다 표 한 줄을 출력하고, 종료 시 JSON 배열을 `--output`에 저장합니다. 새 instance를 관찰하면 0, 관찰하지 못하면 2로 종료하므로 `run_instance_age_trial`은 그 종료 코드를 그대로 반환합니다.
 
 🟢 **실행 — 시작 지연 설정 및 앱 준비**
 
@@ -418,12 +383,14 @@ prepare_startup_delay
 
 ## 4단계 — 시험 A: Prewarmed=0
 
-먼저 `Prewarmed`를 0으로 바꿔 워밍 버퍼 없이 scale-out이 얼마나 걸리는지 측정합니다.
+먼저 `Prewarmed=0`에서 새 instance가 언제 처음 응답에 투입되는지 관찰합니다.
 
-🟢 **실행 — 시험 A 설정과 측정**
+🟢 **실행 — 시험 A 설정과 관찰**
 
 ```bash
 run_trial_a() {
+  local observer_status=0
+
   if ! az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
@@ -449,15 +416,28 @@ run_trial_a() {
 
   AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
   mkdir -p "$AB_DIR"
-  hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-0.out"
-  measure_scale_out "Prewarmed=0" "$AB_DIR/hey-burst-0.out" NO_PREWARM_SECONDS
-  echo "Prewarmed=0: $NO_PREWARM_SECONDS"
-  if [[ ! "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
+  NO_PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-0-observations.json"
+  run_instance_age_trial \
+    "Prewarmed=0" \
+    "$NO_PREWARM_OBSERVATIONS" \
+    "$AB_DIR/hey-burst-0.out"
+  observer_status=$?
+
+  if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$NO_PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
     if ! restore_autoscale_defaults; then
-      echo "시험 A timeout 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 실행하지 마세요." >&2
-      return 1
+      echo "시험 A에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 실행하지 마세요." >&2
+    else
+      echo "시험 A에서 새 instance를 관찰하지 못했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 부하를 다시 걸어 3단계부터 재실행하세요." >&2
     fi
-    echo "시험 A가 timeout되어 시험 B를 실행하지 않습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요."
+    return 1
+  fi
+
+  if [ "$observer_status" -ne 0 ]; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 A 관찰 도구가 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 실행하지 마세요." >&2
+    else
+      echo "시험 A 관찰 도구가 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
+    fi
     return 1
   fi
 }
@@ -468,24 +448,27 @@ run_trial_a
 📋 **예상 출력** (예시)
 
 ```text
-InstanceCount=1
-Prewarmed=0: 48초, 응답 인스턴스 1개
-Prewarmed=0: 53초, 응답 인스턴스 2개
-Prewarmed=0: 53
+InstanceCount=1 timestamp=2026-07-21T02:31:00Z (1/2)
+InstanceCount=1 timestamp=2026-07-21T02:32:00Z (2/2)
+Prewarmed=0 기준 instance: RD0003FFAA11BB
+instance	started_at	first_seen_at	first_response_age
+RD0003FFCC22DD	2026-07-21T02:32:18Z	2026-07-21T02:32:39Z	21
 ```
 
-> 👁️ 마지막 숫자는 “두 번째 인스턴스가 실제 응답에 등장할 때까지 걸린 시간(초)”입니다. 환경에 따라 `timeout`이 출력될 수도 있습니다.
+> 👁️ 표에는 기준 instance를 제외한 **새 instance만** 기록됩니다. 한 시험에서 여러 새 instance가 보이면 JSON 배열과 표에 모두 남습니다.
 
 ---
 
 ## 5단계 — scale-in 게이트 후 시험 B: Prewarmed=1
 
-시험 B는 반드시 시험 A의 인스턴스가 정리된 뒤 시작해야 합니다. 먼저 scale-in 게이트를 통과한 다음 원래 권장값인 `Prewarmed=1`로 같은 실험을 반복합니다.
+시험 B는 반드시 시험 A의 부하가 끝나고 새 기준 상태가 다시 확보된 뒤 시작합니다. `Prewarmed=1`로 되돌린 뒤에도 별도의 prime 부하나 `InstanceCount>=2` 버퍼 게이트는 두지 않고, 같은 burst에서 새 instance의 최초 응답 나이를 다시 관찰합니다.
 
-🟢 **실행 — 시험 B 시작 전 기준 상태 재확인과 측정**
+🟢 **실행 — 시험 B 시작 전 기준 상태 재확인과 관찰**
 
 ```bash
 run_trial_b() {
+  local observer_status=0
+
   SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
     if ! restore_autoscale_defaults; then
@@ -510,17 +493,40 @@ run_trial_b() {
   fi
   B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  hey -z 60s -c 5 -q 2 "$APP_URL/api/info" > "$AB_DIR/hey-prime-1.out"
-  if ! wait_for_buffer_allocation "$B_TRANSITION_AT"; then
+  if ! wait_for_single_instance "$B_TRANSITION_AT"; then
     if ! restore_autoscale_defaults; then
-      echo "시험 B Prewarmed 버퍼 확인 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 이 시험을 다시 시작하지 마세요." >&2
+      echo "시험 B 기준 상태 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 이 시험을 다시 시작하지 마세요." >&2
       return 1
     fi
-    echo "시험 B에서 설정 변경 후 신선한 InstanceCount>=2 버퍼 할당 신호를 확인하지 못했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요."
+    echo "시험 B 시작 전 단일 인스턴스 기준 상태 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요."
     return 1
   fi
-  measure_scale_out "Prewarmed=1" "$AB_DIR/hey-burst-1.out" PREWARM_SECONDS
-  echo "Prewarmed=1: $PREWARM_SECONDS"
+
+  AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
+  PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-1-observations.json"
+  run_instance_age_trial \
+    "Prewarmed=1" \
+    "$PREWARM_OBSERVATIONS" \
+    "$AB_DIR/hey-burst-1.out"
+  observer_status=$?
+
+  if [ "$observer_status" -eq 2 ] || ! jq -e 'length > 0' "$PREWARM_OBSERVATIONS" >/dev/null 2>&1; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 B에서 새 instance를 관찰하지 못했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 다음 단계로 진행하지 마세요." >&2
+    else
+      echo "시험 B에서 새 instance를 관찰하지 못했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 부하를 다시 걸어 3단계부터 재실행하세요." >&2
+    fi
+    return 1
+  fi
+
+  if [ "$observer_status" -ne 0 ]; then
+    if ! restore_autoscale_defaults; then
+      echo "시험 B 관찰 도구가 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 다음 단계로 진행하지 마세요." >&2
+    else
+      echo "시험 B 관찰 도구가 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
+    fi
+    return 1
+  fi
 }
 
 run_trial_b
@@ -529,49 +535,50 @@ run_trial_b
 📋 **예상 출력** (예시)
 
 ```text
-InstanceCount=1
-Prewarmed=1: 19초, 응답 인스턴스 1개
-Prewarmed=1: 24초, 응답 인스턴스 2개
-Prewarmed=1: 24
+InstanceCount=1 timestamp=2026-07-21T02:36:00Z (1/2)
+InstanceCount=1 timestamp=2026-07-21T02:37:00Z (2/2)
+Prewarmed=1 기준 instance: RD0003FFAA11BB
+instance	started_at	first_seen_at	first_response_age
+RD0003FFEE33FF	2026-07-21T02:37:18Z	2026-07-21T02:38:06Z	48
 ```
 
-> 👁️ 두 시험 모두 같은 앱·같은 엔드포인트·같은 부하 함수를 쓰므로, 비교 대상은 `Prewarmed` 설정 차이뿐입니다.
+> 👁️ 두 시험 모두 같은 앱·같은 엔드포인트·같은 burst 부하를 쓰므로, 비교 대상은 `Prewarmed` 설정 차이와 그에 따라 관찰된 instance 타임라인입니다.
 
 ---
 
 ## 6단계 — 결과 해석 및 정리
 
-두 값이 모두 숫자라면 시간 차이를 계산합니다. 단, 아래 출력은 **설명용 예시**일 뿐이며 실제 수치는 환경, 플랫폼 판단 시점, 직전 부하 이력에 따라 달라질 수 있습니다.
+두 시험 모두에서 새 instance가 관찰되었다면, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
 
-🟢 **실행 — 결과 비교**
+🟢 **실행 — 결과 표 출력**
 
 ```bash
-compare_results() {
-  if [[ "$NO_PREWARM_SECONDS" =~ ^[0-9]+$ && "$PREWARM_SECONDS" =~ ^[0-9]+$ ]]; then
-    echo "Prewarmed=0 : ${NO_PREWARM_SECONDS}초"
-    echo "Prewarmed=1 : ${PREWARM_SECONDS}초"
-    echo "개선         : $((NO_PREWARM_SECONDS - PREWARM_SECONDS))초"
-  else
-    echo "한 시험이 timeout되어 시간 차이를 계산할 수 없습니다."
-    if ! restore_autoscale_defaults; then
-      echo "timeout 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 다음 모듈로 진행하지 마세요." >&2
-      return 1
-    fi
-    echo "timeout 상태를 확인했지만 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요."
-    return 1
-  fi
+render_instance_age_results() {
+  jq -r '
+    ["시험","instance","started_at","first_seen_at","first_response_age"],
+    (.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)])
+    | @tsv
+  ' "$NO_PREWARM_OBSERVATIONS"
+
+  jq -r '
+    .[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv
+  ' "$PREWARM_OBSERVATIONS"
 }
 
-compare_results
+render_instance_age_results
 ```
 
 📋 **예상 출력** (예시)
 
 ```text
-Prewarmed=0 : 53초
-Prewarmed=1 : 24초
-개선         : 29초
+시험	instance	started_at	first_seen_at	first_response_age
+Prewarmed=0	RD0003FFCC22DD	2026-07-21T02:32:18Z	2026-07-21T02:32:39Z	21
+Prewarmed=1	RD0003FFEE33FF	2026-07-21T02:37:18Z	2026-07-21T02:38:06Z	48
 ```
+
+- `Prewarmed=1` 행의 `first_response_age`가 20초를 눈에 띄게 넘으면, 준비된 instance가 시작 준비를 마친 뒤 실제 응답 전에 기다린 구간이 관찰된 것입니다. 이는 Prewarmed 버퍼 체류와 **일치하는 외부 증거**로 해석합니다.
+- `Prewarmed=0`과 `Prewarmed=1`의 age가 비슷하면, 이번 실행에서는 버퍼 체류 차이가 뚜렷하게 보이지 않았고 준비된 instance가 곧바로 활성화되었을 수 있다고 설명합니다.
+- 한 시험의 총 시간에서 다른 시험의 총 시간을 빼서 “개선 N초”를 계산하거나 `Prewarmed=1`을 무조건 승자로 선언하지 않습니다.
 
 🟢 **실행 — 모듈 기본 상태로 복원**
 
@@ -592,18 +599,21 @@ restore_module_defaults
 
 ## 검증
 
-### A/B 비교 결과 확인
+### A/B 관찰 파일 확인
 
 🟢 **실행**
 
 ```bash
-echo "NO_PREWARM_SECONDS=${NO_PREWARM_SECONDS:-unset}"
-echo "PREWARM_SECONDS=${PREWARM_SECONDS:-unset}"
+echo "NO_PREWARM_OBSERVATIONS=${NO_PREWARM_OBSERVATIONS:-unset}"
+jq 'length' "$NO_PREWARM_OBSERVATIONS"
+
+echo "PREWARM_OBSERVATIONS=${PREWARM_OBSERVATIONS:-unset}"
+jq 'length' "$PREWARM_OBSERVATIONS"
 ```
 
-- 두 값이 모두 숫자면 두 시험이 끝까지 수행된 것입니다.
-- `PREWARM_SECONDS`가 더 작으면 이번 실행에서는 `Prewarmed=1`이 더 빨리 두 번째 인스턴스를 실응답에 투입한 것입니다.
-- 한쪽이 `timeout`이어도 실패로 단정하지 말고 트러블슈팅을 참고해 다시 시도합니다.
+- 두 파일 모두 존재하고 길이가 1 이상이면, 두 시험에서 새 instance 타임라인이 기록된 것입니다.
+- 한 파일이 비어 있거나 observer가 2로 종료됐다면 이번 실행에서 scale-out을 유도하지 못한 것이므로, 트러블슈팅의 재시도 절차를 따릅니다.
+- 결과 판단은 숫자 승패가 아니라 표의 `started_at` / `first_seen_at` / `first_response_age` 조합으로 합니다.
 
 ### 정리 상태 확인
 
@@ -641,13 +651,14 @@ wait_for_single_instance "$FINAL_TRANSITION_AT"
 
 ## 트러블슈팅
 
-### (1) 한 시험이 `timeout`됨
+### (1) 새 instance를 관찰하지 못함
 
-`measure_scale_out`은 180초 동안 두 번째 인스턴스가 실제 응답에 나타나지 않으면 `timeout`을 기록합니다. 한 번의 `timeout`만으로 Automatic scaling이 실패했다고 단정하지 말고 다음을 점검합니다.
+`observe_instances.py`가 2로 종료되거나 JSON 배열이 비어 있으면, 이번 burst에서 기준 instance 외의 새 instance가 응답에 나타나지 않은 것입니다. 한 번의 실행만으로 Automatic scaling 실패나 `Prewarmed` 무효를 단정하지 말고 다음을 점검합니다.
 
-- `STARTUP_DELAY_SECONDS=20`이 적용된 뒤 앱이 `/health`에 정상 응답했는지 확인합니다.
-- `hey -z 180s -c 100 -q 10` 부하가 너무 약하면 같은 명령을 다시 한 번 수행해 비교합니다.
-- Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 확인합니다.
+- `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
+- 복원 helper가 끝난 뒤 `wait_for_single_instance`로 기준 상태를 다시 확인하고 3단계부터 재실행합니다.
+- 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
+- Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
 ```bash
 START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
@@ -674,18 +685,26 @@ done
 
 Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Plan의 다른 앱이 추가 인스턴스를 붙잡고 있어도 지표가 늦게 내려갈 수 있습니다. 공식 동작 기준으로 축소 판단은 보통 부하 종료 후 5–10분 이후부터 시작되므로, 충분히 기다린 뒤 다시 측정합니다.
 
-### (3) `Prewarmed=1`이 더 빠르지 않음
+### 새 instance의 `first_response_age`가 두 시험에서 비슷함
 
-이 실험은 공유 플랫폼 위에서 실행되므로 매번 같은 숫자가 나오지 않습니다. `Prewarmed=1`이 항상 더 빠르다는 보장은 없으며, 다음 요인이 결과를 흔들 수 있습니다.
+이는 오류가 아닙니다. 이번 실행에서는 준비된 instance가 곧바로 활성화되어 응답 전 대기 구간이 짧았을 수 있습니다. 단일 실행의 총 scale-out 시간만으로 Prewarmed 효과를 단정하지 말고, 인스턴스별 `started_at`과 `first_seen_at`을 관찰 결과로 기록합니다.
 
-- 직전 시험의 scale-in이 완전히 끝나지 않음
-- Azure Monitor 메트릭 적재 지연
-- 플랫폼의 내부 배치/할당 타이밍
-- 네트워크 지연과 `hey`/`curl` 샘플링 오차
+### (4) 복원 helper가 실패함
 
-같은 절차를 한 번 더 반복해 경향을 비교하고, 두 시험 모두에서 `/api/info`의 인스턴스 ID가 결국 2종 이상 나타나는지 함께 확인합니다.
+`restore_autoscale_defaults`가 실패하면 다음 모듈로 넘어가지 말고, 아래 두 검증 명령으로 설정과 앱 상태를 다시 확인한 뒤 수동으로 복구합니다.
 
-### (4) hey 설치 실패
+```bash
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+
+az webapp config appsettings list -g "$RG" -n "$APP" \
+  --query "[?name=='STARTUP_DELAY_SECONDS']"
+
+curl -fsS --max-time 10 "$APP_URL/health"
+```
+
+### (5) hey 설치 실패
 
 `go install`은 GitHub에서 소스를 받아 빌드하므로 네트워크 일시 장애일 수 있습니다. 잠시 후 재시도하고, PATH에 `$HOME/go/bin`이 포함되어 있는지 확인합니다.
 
@@ -695,7 +714,7 @@ export PATH=$HOME/go/bin:$PATH
 command -v hey
 ```
 
-### (5) Premium V2/V3 SKU만 지원한다는 오류
+### (6) Premium V2/V3 SKU만 지원한다는 오류
 
 ```text
 --number-of-workers and --elastic-scale can only be used on premium V2/V3 or workflow SKUs.
