@@ -624,14 +624,15 @@ run_trial_a() {
 run_trial_a
 ```
 
-📋 **예상 출력** (예시)
+📋 **예상 출력** (2026-07-21 리허설 예시)
 
 ```text
-InstanceCount=1 timestamp=2026-07-21T02:31:00Z (1/2)
-InstanceCount=1 timestamp=2026-07-21T02:32:00Z (2/2)
-Prewarmed=0 기준 instance: RD0003FFAA11BB
+Prewarmed=0 기준 instance: 0299d35b
 instance	started_at	first_seen_at	first_response_age
-RD0003FFCC22DD	2026-07-21T02:32:18Z	2026-07-21T02:32:39Z	21
+a2b002c6	2026-07-21T06:37:27Z	2026-07-21T06:37:49Z	22
+e46cbdac	2026-07-21T06:37:04Z	2026-07-21T06:37:50Z	46
+d09f4aa4	2026-07-21T06:37:20Z	2026-07-21T06:37:50Z	30
+0669595a	2026-07-21T06:37:17Z	2026-07-21T06:37:50Z	33
 ```
 
 > 👁️ 표에는 기준 instance를 제외한 **새 instance만** 기록됩니다. 한 시험에서 여러 새 instance가 보이면 JSON 배열과 표에 모두 남습니다.
@@ -695,14 +696,13 @@ run_trial_b() {
 run_trial_b
 ```
 
-📋 **예상 출력** (예시)
+📋 **예상 출력** (2026-07-21 리허설 예시)
 
 ```text
-InstanceCount=1 timestamp=2026-07-21T02:36:00Z (1/2)
-InstanceCount=1 timestamp=2026-07-21T02:37:00Z (2/2)
-Prewarmed=1 기준 instance: RD0003FFAA11BB
+Prewarmed=1 기준 instance: a2b002c6
 instance	started_at	first_seen_at	first_response_age
-RD0003FFEE33FF	2026-07-21T02:37:18Z	2026-07-21T02:38:06Z	48
+5bef3ff3	2026-07-21T06:48:55Z	2026-07-21T06:49:18Z	23
+bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 ```
 
 > 👁️ 두 시험 모두 같은 앱·같은 엔드포인트·같은 burst 부하를 쓰므로, 비교 대상은 `Prewarmed` 설정 차이와 그에 따라 관찰된 instance 타임라인입니다.
@@ -733,17 +733,21 @@ render_instance_age_results() {
 render_instance_age_results
 ```
 
-📋 **예상 출력** (예시)
+📋 **예상 출력** (2026-07-21 리허설 예시)
 
 ```text
 trial	instance	started_at	first_seen_at	first_response_age
-Prewarmed=0	RD0003FFCC22DD	2026-07-21T02:32:18Z	2026-07-21T02:32:39Z	21
-Prewarmed=1	RD0003FFEE33FF	2026-07-21T02:37:18Z	2026-07-21T02:38:06Z	48
+Prewarmed=0	a2b002c6	2026-07-21T06:37:27Z	2026-07-21T06:37:49Z	22
+Prewarmed=0	e46cbdac	2026-07-21T06:37:04Z	2026-07-21T06:37:50Z	46
+Prewarmed=0	d09f4aa4	2026-07-21T06:37:20Z	2026-07-21T06:37:50Z	30
+Prewarmed=0	0669595a	2026-07-21T06:37:17Z	2026-07-21T06:37:50Z	33
+Prewarmed=1	5bef3ff3	2026-07-21T06:48:55Z	2026-07-21T06:49:18Z	23
+Prewarmed=1	bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 [07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다.
 ```
 
-- `Prewarmed=1` 행의 `first_response_age`가 20초를 눈에 띄게 넘으면, 준비된 instance가 시작 준비를 마친 뒤 실제 응답 전에 기다린 구간이 관찰된 것입니다. 이는 Prewarmed 버퍼 체류와 **일치하는 외부 증거**로 해석합니다.
-- `Prewarmed=0`과 `Prewarmed=1`의 age가 비슷하면, 이번 실행에서는 버퍼 체류 차이가 뚜렷하게 보이지 않았고 준비된 instance가 곧바로 활성화되었을 수 있다고 설명합니다.
+- Trial A는 22/30/33/46초, Trial B는 23/23초로 관찰되어, 이번 리허설은 **혼합된 age 증거**를 남겼습니다.
+- `Prewarmed=0`과 `Prewarmed=1`의 age가 모두 보였으므로, 이 단일 실행만으로 Prewarmed의 “항상 이김”을 단정하지 않습니다.
 
 🟢 **실행 — 모듈 기본 상태로 복원**
 
@@ -795,14 +799,19 @@ az webapp config appsettings list -g "$RG" -n "$APP" \
   --query "[?name=='STARTUP_DELAY_SECONDS']"
 ```
 
-📋 **예상 출력**
+📋 **예상 출력** (2026-07-21 리허설 복원 확인)
 
 ```json
+{
+  "automaticScaling": true,
+  "maximumBurst": 5
+}
 {
   "alwaysReady": 1,
   "prewarmed": 1
 }
 []
+{"status":"ok"}
 ```
 
 🟢 **실행 — 복원 이후 신선한 단일 인스턴스 기준 확인**
