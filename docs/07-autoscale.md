@@ -129,79 +129,18 @@ flowchart LR
 PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
 APP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
 
-verify_plan_configuration() {
-  local settings
-  if ! settings=$(az rest --method get \
-    --uri "${PLAN_ID}?api-version=2024-11-01" \
-    --query "properties.{elasticScaleEnabled:elasticScaleEnabled,maximumElasticWorkerCount:maximumElasticWorkerCount}" \
-    --output json)
-  then
-    echo "Plan 설정 read-back에 실패했습니다." >&2
-    return 1
-  fi
-  if ! jq -e '(.elasticScaleEnabled == true and .maximumElasticWorkerCount == 5)' \
-    >/dev/null <<< "$settings"
-  then
-    echo "Plan 설정 read-back이 예상과 다릅니다: $settings" >&2
-    return 1
-  fi
-}
-
-set_prewarmed_configuration() {
-  local expected=$1 settings
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body "{\"properties\":{\"minimumElasticInstanceCount\":1,\"preWarmedInstanceCount\":${expected}}}" \
-    --output none
-  then
-    echo "Always-ready/Prewarmed 설정 변경에 실패했습니다 (expected=$expected)." >&2
-    return 1
-  fi
-  if ! settings=$(az rest --method get \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
-    --output json)
-  then
-    echo "Always-ready/Prewarmed 설정 read-back에 실패했습니다." >&2
-    return 1
-  fi
-  if ! jq -e --argjson expected "$expected" \
-    '(.alwaysReady == 1 and .prewarmed == $expected)' >/dev/null <<< "$settings"
-  then
-    echo "Always-ready/Prewarmed 설정 read-back이 예상과 다릅니다: $settings" >&2
-    return 1
-  fi
-}
-
-enable_autoscale() {
-  if ! az rest --method patch \
-    --uri "${PLAN_ID}?api-version=2024-11-01" \
-    --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
-    --output none
-  then
-    echo "Plan PATCH에 실패했습니다. Web App PATCH는 실행하지 않았습니다. Cloud Shell은 유지한 채 1단계를 다시 실행해 plan/app ID를 다시 확인한 뒤 재시도하세요." >&2
-    return 1
-  fi
-  if ! verify_plan_configuration; then
-    echo "Plan PATCH 후 read-back 검증에 실패했습니다. Web App PATCH는 실행하지 않았습니다. Cloud Shell은 유지한 채 1단계를 다시 실행하지 말고 원인을 확인하세요." >&2
-    return 1
-  fi
-
-  if ! set_prewarmed_configuration 1; then
-    echo "Plan PATCH는 적용됐지만 Web App PATCH에 실패했습니다. Cloud Shell은 유지한 채 1단계를 다시 실행해 Web App 설정을 완료하세요." >&2
-    return 1
-  fi
-}
-
-enable_autoscale
+az rest --method patch \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+  --output none &&
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none &&
+echo "Automatic scaling 설정 완료"
 ```
 
-> 👁️ ARM 속성 `elasticScaleEnabled`는 Plan을 Automatic scaling 모드로 전환합니다. `maximumElasticWorkerCount`는 Maximum burst, `minimumElasticInstanceCount`는 Always-ready 최소값, `preWarmedInstanceCount`는 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
-> Plan PATCH의 `sku` 객체는 ARM API가 기존 P0v4 Plan을 갱신할 때 요구하는 현재 SKU 정보이며, Plan의 가격 계층을 변경하지 않습니다.
->
-> Automatic scaling을 활성화하면 기존 앱의 **ARR Affinity(세션 선호도)**가 자동으로 비활성화됩니다. 특정 인스턴스에 요청을 고정하지 않아야 여러 인스턴스로 트래픽을 고르게 분산할 수 있기 때문입니다.
->
-> **P0v4에서 ARM REST API를 사용하는 이유:** 공식 App Service 기능은 Premium v4를 지원하지만, Azure CLI 2.87.0의 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령에는 Premium v2/v3만 허용하는 이전 SKU 검증 로직이 남아 있습니다. `az rest`는 같은 공식 ARM 속성을 직접 설정하여 이 CLI 제한을 우회합니다.
+> ⚠️ 오류가 출력되거나 `Automatic scaling 설정 완료`가 보이지 않으면 다음 단계로 진행하지 말고, `$RG`, `$PLAN`, `$APP` 값과 오류 메시지를 확인한 뒤 1단계를 다시 실행합니다.
 
 🟢 **실행** — 설정값을 조회합니다.
 
@@ -227,6 +166,13 @@ az rest --method get \
   "prewarmed": 1
 }
 ```
+
+> 👁️ ARM 속성 `elasticScaleEnabled`는 Plan을 Automatic scaling 모드로 전환합니다. `maximumElasticWorkerCount`는 Maximum burst, `minimumElasticInstanceCount`는 Always-ready 최소값, `preWarmedInstanceCount`는 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
+> Plan PATCH의 `sku` 객체는 ARM API가 기존 P0v4 Plan을 갱신할 때 요구하는 현재 SKU 정보이며, Plan의 가격 계층을 변경하지 않습니다.
+>
+> Automatic scaling을 활성화하면 기존 앱의 **ARR Affinity(세션 선호도)**가 자동으로 비활성화됩니다. 특정 인스턴스에 요청을 고정하지 않아야 여러 인스턴스로 트래픽을 고르게 분산할 수 있기 때문입니다.
+>
+> **P0v4에서 ARM REST API를 사용하는 이유:** 공식 App Service 기능은 Premium v4를 지원하지만, Azure CLI 2.87.0의 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령에는 Premium v2/v3만 허용하는 이전 SKU 검증 로직이 남아 있습니다. `az rest`는 같은 공식 ARM 속성을 직접 설정하여 이 CLI 제한을 우회합니다.
 
 ---
 
@@ -311,6 +257,50 @@ wait_for_single_instance() {
   return 1
 }
 
+verify_plan_configuration() {
+  local settings
+  if ! settings=$(az rest --method get \
+    --uri "${PLAN_ID}?api-version=2024-11-01" \
+    --query "properties.{elasticScaleEnabled:elasticScaleEnabled,maximumElasticWorkerCount:maximumElasticWorkerCount}" \
+    --output json)
+  then
+    echo "Plan 설정 read-back에 실패했습니다." >&2
+    return 1
+  fi
+  if ! jq -e '(.elasticScaleEnabled == true and .maximumElasticWorkerCount == 5)' \
+    >/dev/null <<< "$settings"
+  then
+    echo "Plan 설정 read-back이 예상과 다릅니다: $settings" >&2
+    return 1
+  fi
+}
+
+set_prewarmed_configuration() {
+  local expected=$1 settings
+  if ! az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body "{\"properties\":{\"minimumElasticInstanceCount\":1,\"preWarmedInstanceCount\":${expected}}}" \
+    --output none
+  then
+    echo "Always-ready/Prewarmed 설정 변경에 실패했습니다 (expected=$expected)." >&2
+    return 1
+  fi
+  if ! settings=$(az rest --method get \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
+    --output json)
+  then
+    echo "Always-ready/Prewarmed 설정 read-back에 실패했습니다." >&2
+    return 1
+  fi
+  if ! jq -e --argjson expected "$expected" \
+    '(.alwaysReady == 1 and .prewarmed == $expected)' >/dev/null <<< "$settings"
+  then
+    echo "Always-ready/Prewarmed 설정 read-back이 예상과 다릅니다: $settings" >&2
+    return 1
+  fi
+}
+
 wait_for_health() {
   local body
   for attempt in $(seq 1 18); do
@@ -325,7 +315,7 @@ wait_for_health() {
   return 1
 }
 
-prepare_startup_delay() {
+prepare_instance_age_demo() {
   if ! az webapp config appsettings set -g "$RG" -n "$APP" \
     --settings STARTUP_DELAY_SECONDS=20 --output none
   then
@@ -563,7 +553,7 @@ handle_trial_observation() {
 🟢 **실행 — 시작 지연 설정 및 앱 준비**
 
 ```bash
-prepare_startup_delay
+prepare_instance_age_demo
 ```
 
 > 👁️ `wait_for_health`는 제한 시간 내 `/health`가 성공하고 JSON의 `status`가 `ok`인지 확인한 뒤 실제 응답 본문(예: `{"status":"ok"}`)을 출력합니다. 실패하면 최대 18회 재시도 후 1을 반환합니다.
