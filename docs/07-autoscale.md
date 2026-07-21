@@ -390,17 +390,31 @@ restore_autoscale_defaults() {
 
 HEY_PID=""
 HEY_FAILURE=0
+HEY_STATUS=0
 DEMO_MUTATION_ACTIVE=1
 CLEANUP_RUNNING=0
 
 stop_tracked_hey() {
   local pid=$HEY_PID
+  local process_state status=0
   [ -n "$pid" ] || return 0
   if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
+    process_state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+    if [[ "$process_state" != *Z* ]]; then
+      if kill "$pid" 2>/dev/null; then
+        wait "$pid" 2>/dev/null || true
+        HEY_PID=""
+        return 0
+      fi
+    fi
   fi
-  wait "$pid" 2>/dev/null || true
+  if wait "$pid" 2>/dev/null; then
+    status=0
+  else
+    status=$?
+  fi
   HEY_PID=""
+  return "$status"
 }
 
 cleanup_demo() {
@@ -431,9 +445,10 @@ run_instance_age_trial() {
   local hey_output=$3
   local baseline_instance observer_status=0 hey_status=0
   HEY_FAILURE=0
+  HEY_STATUS=0
 
   if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
-    jq -er 'select((.instance | type) == "string" and (.instance | length) > 0) | .instance')
+    jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance')
   then
     echo "$label baseline ID acquisition failed: 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
     return 3
@@ -457,7 +472,16 @@ run_instance_age_trial() {
   fi
 
   if [ "$observer_status" -ne 0 ]; then
-    stop_tracked_hey
+    if stop_tracked_hey; then
+      hey_status=0
+    else
+      hey_status=$?
+    fi
+    HEY_STATUS=$hey_status
+    if [ "$hey_status" -ne 0 ]; then
+      HEY_FAILURE=1
+      echo "$label observer와 hey 부하가 동시에 실패했습니다 (observer=$observer_status, hey=$hey_status)." >&2
+    fi
     return "$observer_status"
   fi
   if wait "$HEY_PID"; then
@@ -466,6 +490,7 @@ run_instance_age_trial() {
     hey_status=$?
   fi
   HEY_PID=""
+  HEY_STATUS=$hey_status
   if [ "$hey_status" -ne 0 ]; then
     HEY_FAILURE=1
     echo "$label hey 부하가 실패했습니다 (exit=$hey_status)." >&2
@@ -478,10 +503,20 @@ handle_trial_observation() {
   local observation_file=$2
   local observer_status=$3
   local message
+  local observer_message
 
   if [ "$HEY_FAILURE" = "1" ]; then
     if ! restore_autoscale_defaults; then
       echo "시험 ${label} hey 부하가 실패했고 복원에도 실패했습니다. 다음 단계를 실행하지 마세요." >&2
+    fi
+    if [ "$observer_status" -ne 0 ]; then
+      case "$observer_status" in
+        1) observer_message="관찰 도구가 오류로 종료했습니다." ;;
+        2) observer_message="새 instance를 관찰하지 못했습니다." ;;
+        3) observer_message="baseline ID acquisition failed." ;;
+        *) observer_message="관찰 도구가 예상하지 못한 상태로 종료했습니다." ;;
+      esac
+      echo "시험 ${label} ${observer_message} (observer exit=${observer_status})와 hey 부하 (exit=${HEY_STATUS})가 동시에 실패했습니다. 복원 및 검증 후 시험을 중단하세요." >&2
     else
       echo "시험 ${label} hey 부하가 실패했습니다. 복원 및 검증 후 시험을 중단하세요." >&2
     fi

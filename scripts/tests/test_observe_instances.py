@@ -1,7 +1,9 @@
 import json
 import multiprocessing
+import threading
 import time
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -321,19 +323,53 @@ def test_observe_cancels_blocked_futures_without_waiting(monkeypatch):
     assert executor.shutdown_args == (False, True)
 
 
-def _blocked_urlopen(url, timeout):
-    while True:
-        time.sleep(1)
+class _BlockedLoopbackHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.server.request_started.set()
+        try:
+            self.wfile.write(b"{")
+            self.wfile.flush()
+            while not self.server.release.wait(0.01):
+                self.wfile.write(b" ")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+    def log_message(self, format, *args):
+        return
 
 
-def test_observe_hard_deadline_reaps_blocked_child_and_worker(monkeypatch):
-    monkeypatch.setattr(oi, "urlopen", _blocked_urlopen)
-    monkeypatch.setattr(oi, "_multiprocessing_context", lambda: multiprocessing.get_context("fork"))
+class _DaemonThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+
+
+def test_observe_hard_deadline_reaps_blocked_child_and_worker():
+    server = _DaemonThreadingHTTPServer(("127.0.0.1", 0), _BlockedLoopbackHandler)
+    server.request_started = threading.Event()
+    server.release = threading.Event()
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
     started_at = time.monotonic()
-
-    with pytest.raises(oi.ObservationExecutionError, match="hard deadline"):
-        oi.observe("http://example.invalid", "baseline", 0.1, 1, 30)
+    try:
+        with pytest.raises(oi.ObservationExecutionError, match="hard deadline"):
+            oi.observe(
+                f"http://127.0.0.1:{server.server_port}/blocked",
+                "baseline",
+                0.25,
+                1,
+                30,
+            )
+        assert server.request_started.is_set()
+    finally:
+        server.release.set()
+        server.shutdown()
+        server.server_close()
+        server_thread.join(1)
 
     elapsed = time.monotonic() - started_at
-    assert elapsed < 1.5
+    assert elapsed < 2
+    assert not server_thread.is_alive()
     assert not any(process.is_alive() for process in multiprocessing.active_children())

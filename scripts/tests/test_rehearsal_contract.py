@@ -19,18 +19,26 @@ def test_rehearsal_verifies_plan_and_trial_configuration():
 def test_rehearsal_preserves_hey_failures_and_stops_tracked_pid():
     assert "stop_tracked_hey()" in REHEARSAL
     assert 'kill "$pid"' in REHEARSAL
+    assert 'process_state=$(ps -o stat= -p "$pid"' in REHEARSAL
+    assert '[[ "$process_state" != *Z*' in REHEARSAL
     assert 'if [ "$observer_status" -ne 0 ]; then' in REHEARSAL
     assert 'return "$observer_status"' in REHEARSAL
     assert "HEY_FAILURE=1" in REHEARSAL
+    assert "HEY_STATUS=$hey_status" in REHEARSAL
+    assert "동시에 실패했습니다" in REHEARSAL
     assert 'if [ "$hey_status" -ne 0 ]; then' in REHEARSAL
     assert 'wait "$HEY_PID" || true' not in REHEARSAL
+    assert "동시에 실패했습니다" in DOCS
+    assert "HEY_STATUS=$hey_status" in DOCS
 
 
 def test_baseline_id_acquisition_is_distinct_from_observer_failure():
     assert "baseline ID acquisition failed" in REHEARSAL
     assert "return 3" in REHEARSAL
+    assert 'test("\\\\S")' in REHEARSAL
     assert "baseline ID acquisition failed" in DOCS
     assert 'message="baseline ID acquisition failed."' in DOCS
+    assert 'test("\\\\S")' in DOCS
 
 
 def test_docs_include_learner_safe_cleanup_and_matching_status_mapping():
