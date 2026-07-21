@@ -792,25 +792,58 @@ jq 'length' "$PREWARM_OBSERVATIONS"
 
 ```bash
 az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
-
-az webapp config appsettings list -g "$RG" -n "$APP" \
-  --query "[?name=='STARTUP_DELAY_SECONDS']"
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
 ```
 
-📋 **예상 출력** (2026-07-21 리허설 복원 확인)
+📋 **예상 출력**
 
 ```json
 {
   "automaticScaling": true,
   "maximumBurst": 5
 }
+```
+
+🟢 **실행**
+
+```bash
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+```
+
+📋 **예상 출력**
+
+```json
 {
   "alwaysReady": 1,
   "prewarmed": 1
 }
-[]
+```
+
+🟢 **실행**
+
+```bash
+az webapp config appsettings list -g "$RG" -n "$APP" \
+  --query "[?name=='STARTUP_DELAY_SECONDS'] | length(@)" -o tsv
+```
+
+📋 **예상 출력**
+
+```text
+0
+```
+
+🟢 **실행**
+
+```bash
+curl -fsS --max-time 10 "$APP_URL/health"
+```
+
+📋 **예상 출력**
+
+```json
 {"status":"ok"}
 ```
 
