@@ -68,8 +68,11 @@ def fetch(url, timeout):
         with urlopen(url, timeout=timeout) as response:
             if getattr(response, "status", 200) != 200:
                 return None
-            return json.load(response)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+            try:
+                return json.load(response)
+            except (OSError, UnicodeDecodeError, ValueError):
+                return None
+    except (HTTPError, URLError, TimeoutError):
         return None
 
 
