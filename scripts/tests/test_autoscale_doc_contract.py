@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 DOC = Path(__file__).parents[2] / "docs" / "07-autoscale.md"
+IMAGE = DOC.parent / "images" / "07-automatic-scaling-portal.png"
 
 
 def section(text, start, end):
@@ -55,6 +56,44 @@ def test_step_one_is_direct_cli_flow():
 
     for label, snippet in required_snippets.items():
         assert snippet in step_one, label
+
+
+def test_step_one_shows_portal_confirmation():
+    text = DOC.read_text(encoding="utf-8")
+    step_one = section(
+        text,
+        "## 1단계 — Automatic scaling 활성화",
+        "## 2단계 — hey 부하 도구 설치",
+    )
+    portal_note = (
+        "> 👁️ CLI로 설정한 Automatic scaling은 "
+        "**Azure Portal 관리 콘솔**에서도 확인할 수 있습니다."
+    )
+    portal_path = (
+        "> Web App 리소스에서 **App Service plan > Scale out**로 이동하면 "
+        "**Scale out method = Automatic**, **Maximum burst = 5**, "
+        "**Always ready instances = 1**을 확인할 수 있습니다."
+    )
+    portal_disclaimer = (
+        "> 이 화면에는 Prewarmed 값이 표시되지 않으므로 "
+        "`Prewarmed = 1`은 위 CLI 조회 결과로 확인합니다."
+    )
+    image_markdown = (
+        "![Azure Portal Scale out 화면에서 Automatic, Maximum burst 5, "
+        "Always ready instances 1 확인]"
+        "(images/07-automatic-scaling-portal.png)"
+    )
+
+    assert portal_note in step_one
+    assert portal_path in step_one
+    assert portal_disclaimer in step_one
+    assert "🖼️ **예상 화면 — Azure Portal Automatic scaling 설정**" in step_one
+    assert image_markdown in step_one
+    assert step_one.index(portal_note) < step_one.index(
+        "> 👁️ ARM 속성 `elasticScaleEnabled`"
+    )
+    assert IMAGE.is_file()
+    assert IMAGE.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_reusable_helpers_are_defined_before_step_three_uses_them():

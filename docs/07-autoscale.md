@@ -167,6 +167,14 @@ az rest --method get \
 }
 ```
 
+> 👁️ CLI로 설정한 Automatic scaling은 **Azure Portal 관리 콘솔**에서도 확인할 수 있습니다.
+> Web App 리소스에서 **App Service plan > Scale out**로 이동하면 **Scale out method = Automatic**, **Maximum burst = 5**, **Always ready instances = 1**을 확인할 수 있습니다.
+> 이 화면에는 Prewarmed 값이 표시되지 않으므로 `Prewarmed = 1`은 위 CLI 조회 결과로 확인합니다.
+
+🖼️ **예상 화면 — Azure Portal Automatic scaling 설정**
+
+![Azure Portal Scale out 화면에서 Automatic, Maximum burst 5, Always ready instances 1 확인](images/07-automatic-scaling-portal.png)
+
 > 👁️ ARM 속성 `elasticScaleEnabled`는 Plan을 Automatic scaling 모드로 전환합니다. `maximumElasticWorkerCount`는 Maximum burst, `minimumElasticInstanceCount`는 Always-ready 최소값, `preWarmedInstanceCount`는 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
 > Plan PATCH의 `sku` 객체는 ARM API가 기존 P0v4 Plan을 갱신할 때 요구하는 현재 SKU 정보이며, Plan의 가격 계층을 변경하지 않습니다.
 >
