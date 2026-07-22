@@ -381,6 +381,61 @@ def test_steps_three_through_six_explain_each_execution_block():
     ) in text
 
 
+def test_trial_observation_explanations_describe_command_flow():
+    text = DOC.read_text(encoding="utf-8")
+    step_four = section(
+        text,
+        "## 4단계 — 시험 A",
+        "## 5단계 — scale-in 게이트 후 시험 B",
+    )
+    step_five = section(
+        text,
+        "## 5단계 — scale-in 게이트 후 시험 B",
+        "## 6단계 — 결과 해석 및 정리",
+    )
+
+    contracts = [
+        (
+            "Trial A",
+            explanation_before_bash(
+                step_four, "🟢 **실행 — 시험 A 관찰**"
+            ),
+            [
+                "`curl`과 `jq`",
+                "`hey -z 180s -c 100 -q 10`",
+                "`HEY_PID=$!`",
+                "`--concurrency 30`",
+                "`--request-timeout 5`",
+                "`$NO_PREWARM_OBSERVATIONS`",
+                "두 exit code가 모두 0",
+            ],
+        ),
+        (
+            "Trial B",
+            explanation_before_bash(
+                step_five, "🟢 **실행 — 시험 B 관찰**"
+            ),
+            [
+                "시험 A와 같은 순서",
+                "`curl`과 `jq`",
+                "`hey -z 180s -c 100 -q 10`",
+                "`HEY_PID=$!`",
+                "`--concurrency 30`",
+                "`--request-timeout 5`",
+                "`$PREWARM_OBSERVATIONS`",
+                "두 exit code가 모두 0",
+            ],
+        ),
+    ]
+
+    for label, explanation, required_terms in contracts:
+        assert explanation.count("\n> 1. ") == 1, label
+        for number in range(2, 6):
+            assert f"\n> {number}. " in explanation, (label, number)
+        for term in required_terms:
+            assert term in explanation, (label, term)
+
+
 def test_trial_observation_runs_only_after_baseline_capture_succeeds():
     text = DOC.read_text(encoding="utf-8")
     step_four = section(

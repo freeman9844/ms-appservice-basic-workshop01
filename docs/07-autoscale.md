@@ -337,7 +337,13 @@ az monitor metrics list \
 
 🟢 **실행 — 시험 A 관찰**
 
-> 👁️ 현재 응답 중인 기준 instance를 먼저 기록한 뒤 `hey`로 180초간 부하를 보내고, observer는 기준 instance를 제외한 새 instance의 최초 응답 시점을 JSON에 저장합니다. 완료 후 observer와 `hey`의 exit code가 모두 0인지 확인합니다.
+> 👁️ **시험 A 명령 흐름**
+>
+> 1. `curl`과 `jq`로 `/api/info` 응답에서 현재 기준 instance ID를 가져옵니다. ID를 얻지 못하면 `if`의 `else`로 이동하므로 부하와 observer는 시작되지 않습니다.
+> 2. `hey -z 180s -c 100 -q 10`은 180초 동안 최대 100개 동시 worker를 사용하고 worker당 초당 10개 요청으로 `/api/info`에 부하를 보냅니다. `&`로 백그라운드 실행하며 요약 결과는 `$AB_DIR/hey-burst-0.out`에 저장합니다.
+> 3. `HEY_PID=$!`는 방금 백그라운드로 시작한 `hey`의 PID를 저장합니다. 뒤의 `wait "$HEY_PID"`가 정확한 부하 프로세스의 완료와 종료 상태를 확인할 때 사용합니다.
+> 4. `observe_instances.py`는 기준 instance를 제외하고 180초 동안 `--concurrency 30`으로 응답을 관찰하며, 각 요청은 `--request-timeout 5`로 제한합니다. 발견한 새 instance의 타임라인은 `$NO_PREWARM_OBSERVATIONS` JSON에 저장합니다.
+> 5. observer가 끝나면 `wait`로 `hey` 종료까지 기다리고 각각의 상태를 `OBSERVER_STATUS`와 `HEY_STATUS`에 저장합니다. 두 exit code가 모두 0일 때만 시험 A를 성공으로 보고 시험 B로 진행합니다.
 
 ```bash
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
@@ -434,7 +440,13 @@ az rest --method get \
 
 🟢 **실행 — 시험 B 관찰**
 
-> 👁️ 시험 A와 동일하게 기준 instance를 확보한 뒤 180초 부하와 observer를 실행하며, 이번에는 새 instance 관찰 결과를 Prewarmed=1 JSON에 저장합니다. 두 프로세스의 exit code가 모두 0이어야 결과 비교를 진행합니다.
+> 👁️ **시험 B 명령 흐름**
+>
+> 1. 시험 A와 같은 순서로 `curl`과 `jq`를 사용해 현재 기준 instance ID를 확보합니다. 차이는 앞 단계에서 Prewarmed=1로 설정했다는 점이며, ID 확보 실패 시 부하를 시작하지 않습니다.
+> 2. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 부하 조건은 동일하게 유지하고 출력 파일만 `$AB_DIR/hey-burst-1.out`을 사용합니다.
+> 3. `HEY_PID=$!`에 Trial B `hey` 프로세스의 PID를 저장하여 뒤의 `wait "$HEY_PID"`가 해당 프로세스의 완료와 종료 상태를 정확히 확인하도록 합니다.
+> 4. `observe_instances.py`는 기준 instance를 제외하고 `--concurrency 30`, `--request-timeout 5` 조건으로 새 instance를 관찰합니다. 결과는 Trial B 전용 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
+> 5. observer와 `hey`가 모두 끝난 뒤 두 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 결과를 비교하지 않고 6단계 복원 명령을 실행합니다.
 
 ```bash
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
