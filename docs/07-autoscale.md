@@ -324,29 +324,33 @@ az monitor metrics list \
 🟢 **실행 — 시험 A 관찰**
 
 ```bash
-BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
-  jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance') &&
-echo "Prewarmed=0 기준 instance: $BASELINE_INSTANCE"
+if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
+  jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
+  echo "Prewarmed=0 기준 instance: $BASELINE_INSTANCE"
 
-hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
-  > "$AB_DIR/hey-burst-0.out" &
-HEY_PID=$!
+  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
+    > "$AB_DIR/hey-burst-0.out" &
+  HEY_PID=$!
 
-python3 "$REPO_DIR/scripts/observe_instances.py" \
-  --url "$APP_URL/api/info" \
-  --baseline-instance "$BASELINE_INSTANCE" \
-  --duration 180 \
-  --concurrency 30 \
-  --request-timeout 5 \
-  --output "$NO_PREWARM_OBSERVATIONS"
-OBSERVER_STATUS=$?
+  python3 "$REPO_DIR/scripts/observe_instances.py" \
+    --url "$APP_URL/api/info" \
+    --baseline-instance "$BASELINE_INSTANCE" \
+    --duration 180 \
+    --concurrency 30 \
+    --request-timeout 5 \
+    --output "$NO_PREWARM_OBSERVATIONS"
+  OBSERVER_STATUS=$?
 
-wait "$HEY_PID"
-HEY_STATUS=$?
+  wait "$HEY_PID"
+  HEY_STATUS=$?
 
-echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
-if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
-  echo "시험 A 실패: 다음 시험으로 진행하지 말고 6단계의 복원 명령을 실행하세요." >&2
+  echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
+  if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
+    echo "시험 A 실패: 다음 시험으로 진행하지 말고 6단계의 복원 명령을 실행하세요." >&2
+    false
+  fi
+else
+  echo "시험 A 기준 instance 확인 실패: 6단계의 모듈 기본 상태로 복원 명령을 실행한 뒤 3단계부터 다시 시도하세요." >&2
   false
 fi
 ```
@@ -411,29 +415,33 @@ az rest --method get \
 🟢 **실행 — 시험 B 관찰**
 
 ```bash
-BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
-  jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance') &&
-echo "Prewarmed=1 기준 instance: $BASELINE_INSTANCE"
+if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
+  jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
+  echo "Prewarmed=1 기준 instance: $BASELINE_INSTANCE"
 
-hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
-  > "$AB_DIR/hey-burst-1.out" &
-HEY_PID=$!
+  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
+    > "$AB_DIR/hey-burst-1.out" &
+  HEY_PID=$!
 
-python3 "$REPO_DIR/scripts/observe_instances.py" \
-  --url "$APP_URL/api/info" \
-  --baseline-instance "$BASELINE_INSTANCE" \
-  --duration 180 \
-  --concurrency 30 \
-  --request-timeout 5 \
-  --output "$PREWARM_OBSERVATIONS"
-OBSERVER_STATUS=$?
+  python3 "$REPO_DIR/scripts/observe_instances.py" \
+    --url "$APP_URL/api/info" \
+    --baseline-instance "$BASELINE_INSTANCE" \
+    --duration 180 \
+    --concurrency 30 \
+    --request-timeout 5 \
+    --output "$PREWARM_OBSERVATIONS"
+  OBSERVER_STATUS=$?
 
-wait "$HEY_PID"
-HEY_STATUS=$?
+  wait "$HEY_PID"
+  HEY_STATUS=$?
 
-echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
-if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
-  echo "시험 B 실패: 결과를 해석하지 말고 6단계의 복원 명령을 실행하세요." >&2
+  echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
+  if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
+    echo "시험 B 실패: 결과를 해석하지 말고 6단계의 복원 명령을 실행하세요." >&2
+    false
+  fi
+else
+  echo "시험 B 기준 instance 확인 실패: 6단계의 복원 명령을 실행한 뒤 결과를 해석하지 말고 3단계부터 다시 시도하세요." >&2
   false
 fi
 ```
