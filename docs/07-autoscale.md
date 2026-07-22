@@ -353,9 +353,6 @@ fi
 
 > ⚠️ `observer exit=0, hey exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되면 새 instance를 관찰하지 못한 것이므로 6단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 복원 후 3단계부터 다시 시도합니다.
 
-> 👁️ 이후 rehearsal helper 계약은 `handle_trial_observation`, `trap cleanup_demo EXIT`, `trap 'cleanup_demo 130' INT`, `trap 'cleanup_demo 143' TERM`, `trap - EXIT INT TERM`, `CLEANUP_RUNNING=0`, `HEY_STATUS=$hey_status`, `return "$observer_status"`, `message="baseline ID acquisition failed."`, `baseline ID acquisition failed`, `동시에 실패했습니다`, `관찰 도구가 오류로 종료했습니다.`, `새 instance를 관찰하지 못했습니다.`를 그대로 사용합니다.
-
-
 📋 **예상 출력** (2026-07-21 리허설 예시)
 
 ```text
@@ -375,58 +372,73 @@ d09f4aa4	2026-07-21T06:37:20Z	2026-07-21T06:37:50Z	30
 
 시험 B는 반드시 시험 A의 부하가 끝나고 새 기준 상태가 다시 확보된 뒤 시작합니다. `Prewarmed=1`로 되돌린 뒤에도 별도의 prime 부하나 `InstanceCount>=2` 버퍼 게이트는 두지 않고, 같은 burst에서 새 instance의 최초 응답 나이를 다시 관찰합니다.
 
-🟢 **실행 — 시험 B 시작 전 기준 상태 재확인과 관찰**
+🟢 **실행 — 시험 B 시작 전 단일 인스턴스 기준 상태 확인**
 
 ```bash
-run_trial_b() {
-  local observer_status=0
-
-  SCALE_IN_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  if ! wait_for_single_instance "$SCALE_IN_TRANSITION_AT"; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 A 후 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 시험 B를 시작하지 마세요." >&2
-      return 1
-    fi
-    echo "시험 B 시작 전 기준 상태 재확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요."
-    return 1
-  fi
-
-  if ! set_prewarmed_configuration 1; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 B 설정 변경에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 이 시험을 다시 시작하지 마세요." >&2
-    else
-      echo "시험 B 설정 변경에 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요." >&2
-    fi
-    return 1
-  fi
-  B_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-  if ! wait_for_single_instance "$B_TRANSITION_AT"; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 B 기준 상태 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 이 시험을 다시 시작하지 마세요." >&2
-      return 1
-    fi
-    echo "시험 B 시작 전 단일 인스턴스 기준 상태 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 3단계부터 다시 시도하세요."
-    return 1
-  fi
-
-  AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
-  PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-1-observations.json"
-  if run_instance_age_trial \
-    "Prewarmed=1" \
-    "$PREWARM_OBSERVATIONS" \
-    "$AB_DIR/hey-burst-1.out"
-  then
-    observer_status=0
-  else
-    observer_status=$?
-  fi
-
-  handle_trial_observation "B" "$PREWARM_OBSERVATIONS" "$observer_status"
-}
-
-run_trial_b
+az monitor metrics list \
+  --resource "$APP_ID" \
+  --metric InstanceCount \
+  --interval PT1M \
+  --aggregation Maximum \
+  --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
+  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,count:maximum}" \
+  -o table
 ```
+
+> 👁️ 최신 행의 `count`가 `1`이 될 때까지 30초 정도 간격으로 같은 명령을 다시 실행합니다. 별도의 prime 부하나 `InstanceCount>=2` 확인은 하지 않습니다.
+
+🟢 **실행 — Prewarmed=1 설정**
+
+```bash
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none &&
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "alwaysReady": 1,
+  "prewarmed": 1
+}
+```
+
+🟢 **실행 — 시험 B 관찰**
+
+```bash
+BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
+  jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance') &&
+echo "Prewarmed=1 기준 instance: $BASELINE_INSTANCE"
+
+hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
+  > "$AB_DIR/hey-burst-1.out" &
+HEY_PID=$!
+
+python3 "$REPO_DIR/scripts/observe_instances.py" \
+  --url "$APP_URL/api/info" \
+  --baseline-instance "$BASELINE_INSTANCE" \
+  --duration 180 \
+  --concurrency 30 \
+  --request-timeout 5 \
+  --output "$PREWARM_OBSERVATIONS"
+OBSERVER_STATUS=$?
+
+wait "$HEY_PID"
+HEY_STATUS=$?
+
+echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
+if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
+  echo "시험 B 실패: 결과를 해석하지 말고 6단계의 복원 명령을 실행하세요." >&2
+  false
+fi
+```
+
+> ⚠️ `observer exit=0, hey exit=0`일 때만 결과를 해석합니다.
 
 📋 **예상 출력** (2026-07-21 리허설 예시)
 
@@ -448,21 +460,17 @@ bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 🟢 **실행 — 결과 표 출력**
 
 ```bash
-render_instance_age_results() {
-  jq -r '
-    ["trial","instance","started_at","first_seen_at","first_response_age"],
-    (.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)])
-    | @tsv
-  ' "$NO_PREWARM_OBSERVATIONS"
+jq -r '
+  ["trial","instance","started_at","first_seen_at","first_response_age"],
+  (.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)])
+  | @tsv
+' "$NO_PREWARM_OBSERVATIONS"
 
-  jq -r '
-    .[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv
-  ' "$PREWARM_OBSERVATIONS"
+jq -r '
+  .[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv
+' "$PREWARM_OBSERVATIONS"
 
-  echo "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
-}
-
-render_instance_age_results
+echo "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 ```
 
 📋 **예상 출력** (2026-07-21 리허설 예시)
@@ -483,17 +491,76 @@ Prewarmed=1	bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 
 🟢 **실행 — 모듈 기본 상태로 복원**
 
-```bash
-restore_module_defaults() {
-  if ! restore_autoscale_defaults; then
-    echo "복원에 실패했습니다. 설정과 /health를 다시 확인한 뒤 다음 모듈로 진행하지 마세요." >&2
-    return 1
-  fi
-  DEMO_MUTATION_ACTIVE=0
-  trap - EXIT INT TERM
-}
+> 👁️ 시험 A 또는 B가 실패했을 때도 아래 블록을 즉시 실행할 수 있습니다.
 
-restore_module_defaults
+```bash
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none &&
+az webapp config appsettings delete -g "$RG" -n "$APP" \
+  --setting-names STARTUP_DELAY_SECONDS --output none &&
+echo "Always-ready=1, Prewarmed=1 복원 및 STARTUP_DELAY_SECONDS 삭제 완료"
+```
+
+🟢 **실행 — 복원 후 앱 준비 확인**
+
+```bash
+for attempt in $(seq 1 18); do
+  HEALTH_BODY=$(curl -fsS --max-time 10 "$APP_URL/health" 2>/dev/null || true)
+  if jq -e '.status == "ok"' >/dev/null 2>&1 <<< "$HEALTH_BODY"; then
+    printf '%s\n' "$HEALTH_BODY"
+    break
+  fi
+  if [ "$attempt" -eq 18 ]; then
+    echo "/health 확인 실패: 다음 모듈로 진행하지 마세요." >&2
+    false
+  fi
+  sleep 5
+done
+```
+
+🟢 **실행 — 복원 상태 조회**
+
+```bash
+az rest --method get \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "automaticScaling": true,
+  "maximumBurst": 5
+}
+```
+
+```bash
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "alwaysReady": 1,
+  "prewarmed": 1
+}
+```
+
+```bash
+az webapp config appsettings list -g "$RG" -n "$APP" \
+  --query "[?name=='STARTUP_DELAY_SECONDS'] | length(@)" -o tsv
+```
+
+📋 **예상 출력**
+
+```text
+0
 ```
 
 > 👁️ 정리 후 모듈 종료 상태는 다시 **Always ready 1 · Prewarmed 1 · Maximum burst 5**이며, `STARTUP_DELAY_SECONDS`도 제거되어 다음 모듈에 실험용 지연이 남지 않습니다.
@@ -518,76 +585,6 @@ jq 'length' "$PREWARM_OBSERVATIONS"
 - 한 파일이 비어 있거나 observer가 2로 종료됐다면 이번 실행에서 scale-out을 유도하지 못한 것이므로, 트러블슈팅의 재시도 절차를 따릅니다.
 - 결과 판단은 숫자 승패가 아니라 표의 `started_at` / `first_seen_at` / `first_response_age` 조합으로 합니다.
 
-### 정리 상태 확인
-
-🟢 **실행**
-
-```bash
-az rest --method get \
-  --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
-```
-
-📋 **예상 출력**
-
-```json
-{
-  "automaticScaling": true,
-  "maximumBurst": 5
-}
-```
-
-🟢 **실행**
-
-```bash
-az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
-```
-
-📋 **예상 출력**
-
-```json
-{
-  "alwaysReady": 1,
-  "prewarmed": 1
-}
-```
-
-🟢 **실행**
-
-```bash
-az webapp config appsettings list -g "$RG" -n "$APP" \
-  --query "[?name=='STARTUP_DELAY_SECONDS'] | length(@)" -o tsv
-```
-
-📋 **예상 출력**
-
-```text
-0
-```
-
-🟢 **실행**
-
-```bash
-curl -fsS --max-time 10 "$APP_URL/health"
-```
-
-📋 **예상 출력**
-
-```json
-{"status":"ok"}
-```
-
-🟢 **실행 — 복원 이후 신선한 단일 인스턴스 기준 확인**
-
-```bash
-FINAL_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-wait_for_single_instance "$FINAL_TRANSITION_AT"
-```
-
-복원 이후 서로 다른 시각의 `InstanceCount=1` 샘플 두 개가 나오면 다음 모듈로 넘어갈 준비가 된 것입니다.
-
 ---
 
 ## 트러블슈팅
@@ -598,7 +595,7 @@ wait_for_single_instance "$FINAL_TRANSITION_AT"
 
 - 새 Cloud Shell에서 시작했다면 위 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인한 뒤, 0단계에서 `SUFFIX`와 Azure 리소스 변수만 다시 맞춥니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
-- 복원 helper가 끝난 뒤 `wait_for_single_instance`로 기준 상태를 다시 확인하고 3단계부터 재실행합니다.
+- 6단계의 복원 명령을 실행한 뒤, 5단계의 단일 인스턴스 조회 명령으로 최신 행의 `count`가 `1`인지 다시 확인하고 3단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
 - Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
@@ -616,11 +613,18 @@ az monitor metrics list \
 
 ### (2) 단일 인스턴스로 축소되지 않음
 
-시험 A 뒤 `wait_for_single_instance`가 계속 실패하면 시험 B를 실행하지 말고, 앞선 게이트 블록이 복원 helper로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추도록 되어 있습니다. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 3단계부터 재실행하세요.
+시험 A 뒤 5단계의 단일 인스턴스 조회에서 최신 행의 `count`가 계속 2 이상이면 시험 B를 실행하지 말고, 6단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 3단계부터 재실행하세요.
 
 ```bash
 for attempt in $(seq 1 5); do
-  latest_instance_count
+  az monitor metrics list \
+    --resource "$APP_ID" \
+    --metric InstanceCount \
+    --interval PT1M \
+    --aggregation Maximum \
+    --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
+    --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,count:maximum}" \
+    -o table
   sleep 60
 done
 ```
@@ -631,9 +635,9 @@ Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Pla
 
 이는 오류가 아닙니다. 이번 실행에서는 준비된 instance가 곧바로 활성화되어 응답 전 대기 구간이 짧았을 수 있습니다. 단일 실행의 총 scale-out 시간만으로 Prewarmed 효과를 단정하지 말고, 인스턴스별 `started_at`과 `first_seen_at`을 관찰 결과로 기록합니다.
 
-### (4) 복원 helper가 실패함
+### (4) 복원 명령이 실패함
 
-`restore_autoscale_defaults`가 실패하면 다음 모듈로 넘어가지 말고, 아래 두 검증 명령으로 설정과 앱 상태를 다시 확인한 뒤 수동으로 복구합니다.
+6단계의 복원 블록이 실패하면 다음 모듈로 넘어가지 말고, 아래 검증 명령으로 설정과 앱 상태를 다시 확인한 뒤 수동으로 복구합니다.
 
 ```bash
 az rest --method get \

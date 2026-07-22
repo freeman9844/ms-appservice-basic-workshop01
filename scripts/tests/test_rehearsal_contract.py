@@ -29,9 +29,12 @@ def test_rehearsal_preserves_hey_failures_and_stops_tracked_pid():
     assert "동시에 실패했습니다" in REHEARSAL
     assert 'if [ "$hey_status" -ne 0 ]; then' in REHEARSAL
     assert 'wait "$HEY_PID" || true' not in REHEARSAL
-    assert "동시에 실패했습니다" in DOCS
-    assert "HEY_STATUS=$hey_status" in DOCS
-    assert 'return "$observer_status"' in DOCS
+    assert 'echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"' in DOCS
+    assert "시험 A 실패: 다음 시험으로 진행하지 말고 6단계의 복원 명령을 실행하세요." in DOCS
+    assert "시험 B 실패: 결과를 해석하지 말고 6단계의 복원 명령을 실행하세요." in DOCS
+    assert "동시에 실패했습니다" not in DOCS
+    assert "HEY_STATUS=$hey_status" not in DOCS
+    assert 'return "$observer_status"' not in DOCS
     assert 'return "$hey_status"' not in DOCS
 
 
@@ -39,19 +42,24 @@ def test_baseline_id_acquisition_is_distinct_from_observer_failure():
     assert "baseline ID acquisition failed" in REHEARSAL
     assert "return 3" in REHEARSAL
     assert 'test("\\\\S")' in REHEARSAL
-    assert "baseline ID acquisition failed" in DOCS
-    assert 'message="baseline ID acquisition failed."' in DOCS
+    assert 'BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |' in DOCS
     assert 'test("\\\\S")' in DOCS
+    assert "baseline ID acquisition failed" not in DOCS
+    assert 'message="baseline ID acquisition failed."' not in DOCS
 
 
-def test_docs_include_learner_safe_cleanup_and_matching_status_mapping():
-    assert "trap cleanup_demo EXIT" in DOCS
-    assert "trap 'cleanup_demo 130' INT" in DOCS
-    assert "trap 'cleanup_demo 143' TERM" in DOCS
-    assert "CLEANUP_RUNNING=0" in DOCS
-    assert "trap - EXIT INT TERM" in DOCS
-    assert "handle_trial_observation" in DOCS
-    assert "관찰 도구가 오류로 종료했습니다." in DOCS
-    assert "새 instance를 관찰하지 못했습니다." in DOCS
+def test_docs_use_direct_restoration_instead_of_cleanup_helpers():
+    assert "trap cleanup_demo EXIT" not in DOCS
+    assert "trap 'cleanup_demo 130' INT" not in DOCS
+    assert "trap 'cleanup_demo 143' TERM" not in DOCS
+    assert "CLEANUP_RUNNING=0" not in DOCS
+    assert "trap - EXIT INT TERM" not in DOCS
+    assert "handle_trial_observation" not in DOCS
+    assert "관찰 도구가 오류로 종료했습니다." not in DOCS
+    assert "새 instance를 관찰하지 못했습니다." not in DOCS
+    assert 'az webapp config appsettings delete -g "$RG" -n "$APP"' in DOCS
+    assert 'echo "Always-ready=1, Prewarmed=1 복원 및 STARTUP_DELAY_SECONDS 삭제 완료"' in DOCS
+    assert "for attempt in $(seq 1 18); do" in DOCS
+    assert "/health 확인 실패: 다음 모듈로 진행하지 마세요." in DOCS
     assert 'wait "$HEY_PID" || true' not in DOCS
     assert "플랫폼 내부 라우팅이 실제로 시작된 정확한 시각은 아닙니다" in DOCS

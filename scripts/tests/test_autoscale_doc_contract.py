@@ -167,3 +167,75 @@ def test_steps_three_and_four_use_direct_commands():
     }
     for label, snippet in trial_a_snippets.items():
         assert snippet in step_four, label
+
+    assert "rehearsal helper 계약" not in step_four
+    assert "cleanup_demo" not in step_four
+    assert "handle_trial_observation" not in step_four
+
+
+def test_steps_five_and_six_use_direct_commands():
+    text = DOC.read_text(encoding="utf-8")
+    step_five = section(
+        text,
+        "## 5단계 — scale-in 게이트 후 시험 B",
+        "## 6단계 — 결과 해석 및 정리",
+    )
+    step_six = section(
+        text,
+        "## 6단계 — 결과 해석 및 정리",
+        "## 검증",
+    )
+
+    assert FUNCTION_DEFINITION.search(step_five) is None
+    assert FUNCTION_DEFINITION.search(step_six) is None
+
+    trial_b_snippets = {
+        "single instance metric": "az monitor metrics list",
+        "Prewarmed one PATCH": (
+            '\'{"properties":{"minimumElasticInstanceCount":1,'
+            '"preWarmedInstanceCount":1}}\''
+        ),
+        "baseline instance": "BASELINE_INSTANCE=$(curl -fsS --max-time 10",
+        "load output": '"$AB_DIR/hey-burst-1.out"',
+        "observer output": '--output "$PREWARM_OBSERVATIONS"',
+        "load command": 'hey -z 180s -c 100 -q 10 "$APP_URL/api/info"',
+        "observer command": (
+            'python3 "$REPO_DIR/scripts/observe_instances.py"'
+        ),
+        "load wait": 'wait "$HEY_PID"',
+        "restoration guidance": "6단계의 복원 명령",
+    }
+    for label, snippet in trial_b_snippets.items():
+        assert snippet in step_five, label
+
+    assert step_five.count(
+        'hey -z 180s -c 100 -q 10 "$APP_URL/api/info"'
+    ) == 1
+    assert "prime_url" not in step_five
+    assert "wait_for_prewarmed" not in step_five
+
+    restoration_snippets = {
+        "Trial A result": '"$NO_PREWARM_OBSERVATIONS"',
+        "Trial B result": '"$PREWARM_OBSERVATIONS"',
+        "default PATCH": (
+            '\'{"properties":{"minimumElasticInstanceCount":1,'
+            '"preWarmedInstanceCount":1}}\''
+        ),
+        "startup delay deletion": (
+            "az webapp config appsettings delete"
+        ),
+        "health polling": "for attempt in $(seq 1 18); do",
+        "plan read-back": (
+            '--query "properties.{automaticScaling:elasticScaleEnabled,'
+            'maximumBurst:maximumElasticWorkerCount}"'
+        ),
+        "web read-back": (
+            '--query "properties.{alwaysReady:minimumElasticInstanceCount,'
+            'prewarmed:preWarmedInstanceCount}"'
+        ),
+        "startup delay read-back": (
+            '--query "[?name==\'STARTUP_DELAY_SECONDS\'] | length(@)"'
+        ),
+    }
+    for label, snippet in restoration_snippets.items():
+        assert snippet in step_six, label
