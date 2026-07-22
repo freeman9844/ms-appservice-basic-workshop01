@@ -436,6 +436,53 @@ def test_trial_observation_explanations_describe_command_flow():
             assert term in explanation, (label, term)
 
 
+def test_step_six_explains_the_observed_prewarmed_benefit():
+    text = DOC.read_text(encoding="utf-8")
+    step_six = section(
+        text,
+        "## 6단계 — 결과 해석 및 정리",
+        "🟢 **실행 — 모듈 기본 상태로 복원**",
+    )
+
+    required_snippets = {
+        "summary heading": "🟢 **실행 — 관찰 범위 요약**",
+        "dynamic summary": "jq -s -r '",
+        "summary columns": (
+            '["trial","samples","min_age","max_age","range"]'
+        ),
+        "minimum": "$ages[0]",
+        "maximum": "$ages[-1]",
+        "range": "($ages[-1] - $ages[0])",
+        "official link": (
+            "https://learn.microsoft.com/azure/app-service/"
+            "manage-automatic-scaling"
+        ),
+        "buffer mechanism": "warmed capacity buffer",
+        "readiness floor": "약 20초의 readiness floor",
+        "Trial A evidence": "22–46초",
+        "Trial A range": "24초",
+        "Trial B evidence": "23초",
+        "tail framing": "긴 지연 꼬리",
+        "unequal samples": "4개 대 2개",
+        "client observation": "`first_seen_at`은 클라이언트",
+        "no internal label": "active/Prewarmed 상태",
+        "no causality": "인과관계를 증명하지는 않습니다",
+        "alternate result": "이번 실행에서는 이점이 관찰되지 않은 것",
+    }
+
+    for label, snippet in required_snippets.items():
+        assert snippet in step_six, label
+
+    expected_summary = "\n".join(
+        [
+            "trial\tsamples\tmin_age\tmax_age\trange",
+            "Prewarmed=0\t4\t22\t46\t24",
+            "Prewarmed=1\t2\t23\t23\t0",
+        ]
+    )
+    assert expected_summary in step_six
+
+
 def test_trial_observation_runs_only_after_baseline_capture_succeeds():
     text = DOC.read_text(encoding="utf-8")
     step_four = section(
