@@ -19,6 +19,33 @@ def code_block_after(text, marker):
     return after_marker.split("```bash", 1)[1].split("```", 1)[0]
 
 
+def assert_health_polling_contract(command_block, failure_message):
+    assert "HEALTH_CHECK_STATUS=1" in command_block
+    assert "for attempt in $(seq 1 18); do" in command_block
+    assert 'HEALTH_BODY=$(curl -fsS --max-time 10 "$APP_URL/health" 2>/dev/null || true)' in command_block
+    assert 'if jq -e \'.status == "ok"\' >/dev/null 2>&1 <<< "$HEALTH_BODY"; then' in command_block
+    assert "printf '%s\\n' \"$HEALTH_BODY\"" in command_block
+    assert "HEALTH_CHECK_STATUS=0" in command_block
+    assert 'if [ "$attempt" -lt 18 ]; then' in command_block
+    assert "sleep 5" in command_block
+    assert 'if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then' in command_block
+    assert failure_message in command_block
+    assert "false" in command_block
+    assert 'if [ "$attempt" -eq 18 ]; then' not in command_block
+
+    sleep_guard = """if [ "$attempt" -lt 18 ]; then
+    sleep 5
+  fi"""
+    assert sleep_guard in command_block
+    assert command_block.index("HEALTH_CHECK_STATUS=1") < command_block.index(
+        "for attempt in $(seq 1 18); do"
+    )
+    assert command_block.index("HEALTH_CHECK_STATUS=0") < command_block.index("break")
+    assert command_block.index("done") < command_block.index(
+        'if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then'
+    )
+
+
 def test_step_one_is_direct_cli_flow():
     text = DOC.read_text(encoding="utf-8")
     step_one = section(
@@ -289,3 +316,33 @@ def test_trial_observation_runs_only_after_baseline_capture_succeeds():
         assert 'python3 "$REPO_DIR/scripts/observe_instances.py"' in then_branch, label
         assert 'hey -z 180s -c 100 -q 10 "$APP_URL/api/info"' not in else_branch, label
         assert 'python3 "$REPO_DIR/scripts/observe_instances.py"' not in else_branch, label
+
+
+def test_health_polling_blocks_fail_after_final_attempt_without_sleeping():
+    text = DOC.read_text(encoding="utf-8")
+    step_three = section(
+        text,
+        "## 3단계 — Prewarmed A/B 비교 준비",
+        "## 4단계 — 시험 A",
+    )
+    step_six = section(
+        text,
+        "## 6단계 — 결과 해석 및 정리",
+        "## 검증",
+    )
+
+    health_contracts = [
+        (
+            "step 3 health check",
+            code_block_after(step_three, "🟢 **실행 — 앱 준비 상태 확인**"),
+            'echo "/health 확인 실패: 6단계의 복원 명령을 실행하세요." >&2',
+        ),
+        (
+            "step 6 health check",
+            code_block_after(step_six, "🟢 **실행 — 복원 후 앱 준비 확인**"),
+            'echo "/health 확인 실패: 다음 모듈로 진행하지 마세요." >&2',
+        ),
+    ]
+
+    for label, command_block, failure_message in health_contracts:
+        assert_health_polling_contract(command_block, failure_message), label

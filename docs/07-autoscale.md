@@ -233,18 +233,22 @@ echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 🟢 **실행 — 앱 준비 상태 확인**
 
 ```bash
+HEALTH_CHECK_STATUS=1
 for attempt in $(seq 1 18); do
   HEALTH_BODY=$(curl -fsS --max-time 10 "$APP_URL/health" 2>/dev/null || true)
   if jq -e '.status == "ok"' >/dev/null 2>&1 <<< "$HEALTH_BODY"; then
     printf '%s\n' "$HEALTH_BODY"
+    HEALTH_CHECK_STATUS=0
     break
   fi
-  if [ "$attempt" -eq 18 ]; then
-    echo "/health 확인 실패: 6단계의 복원 명령을 실행하세요." >&2
-    false
+  if [ "$attempt" -lt 18 ]; then
+    sleep 5
   fi
-  sleep 5
 done
+if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
+  echo "/health 확인 실패: 6단계의 복원 명령을 실행하세요." >&2
+  false
+fi
 ```
 
 📋 **예상 출력**
@@ -514,18 +518,22 @@ echo "Always-ready=1, Prewarmed=1 복원 및 STARTUP_DELAY_SECONDS 삭제 완료
 🟢 **실행 — 복원 후 앱 준비 확인**
 
 ```bash
+HEALTH_CHECK_STATUS=1
 for attempt in $(seq 1 18); do
   HEALTH_BODY=$(curl -fsS --max-time 10 "$APP_URL/health" 2>/dev/null || true)
   if jq -e '.status == "ok"' >/dev/null 2>&1 <<< "$HEALTH_BODY"; then
     printf '%s\n' "$HEALTH_BODY"
+    HEALTH_CHECK_STATUS=0
     break
   fi
-  if [ "$attempt" -eq 18 ]; then
-    echo "/health 확인 실패: 다음 모듈로 진행하지 마세요." >&2
-    false
+  if [ "$attempt" -lt 18 ]; then
+    sleep 5
   fi
-  sleep 5
 done
+if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
+  echo "/health 확인 실패: 다음 모듈로 진행하지 마세요." >&2
+  false
+fi
 ```
 
 🟢 **실행 — 복원 상태 조회**
