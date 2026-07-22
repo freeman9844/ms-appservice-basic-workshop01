@@ -17,6 +17,9 @@ APP_ID=""
 HEY_PID=""
 HEY_FAILURE=0
 HEY_STATUS=0
+METRIC_OBSERVER_PID=""
+METRIC_FAILURE=0
+METRIC_STATUS=0
 PREWARMED_RESTORE_NEEDED=0
 CLEANUP_RUNNING=0
 
@@ -28,9 +31,13 @@ stop_tracked_hey() {
     process_state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
     if [[ "$process_state" != *Z* ]]; then
       if kill "$pid" 2>/dev/null; then
-        wait "$pid" 2>/dev/null || true
+        if wait "$pid" 2>/dev/null; then
+          status=0
+        else
+          status=$?
+        fi
         HEY_PID=""
-        return 0
+        return "$status"
       fi
     fi
   fi
@@ -43,6 +50,33 @@ stop_tracked_hey() {
   return "$status"
 }
 
+stop_tracked_metric_observer() {
+  local pid=$METRIC_OBSERVER_PID
+  local process_state status=0
+  [ -n "$pid" ] || return 0
+  if kill -0 "$pid" 2>/dev/null; then
+    process_state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+    if [[ "$process_state" != *Z* ]]; then
+      if kill "$pid" 2>/dev/null; then
+        if wait "$pid" 2>/dev/null; then
+          status=0
+        else
+          status=$?
+        fi
+        METRIC_OBSERVER_PID=""
+        return "$status"
+      fi
+    fi
+  fi
+  if wait "$pid" 2>/dev/null; then
+    status=0
+  else
+    status=$?
+  fi
+  METRIC_OBSERVER_PID=""
+  return "$status"
+}
+
 cleanup() {
   local exit_code=$?
   local cleanup_status=0
@@ -50,6 +84,9 @@ cleanup() {
     return "$exit_code"
   fi
   CLEANUP_RUNNING=1
+  if [ -n "$METRIC_OBSERVER_PID" ]; then
+    stop_tracked_metric_observer || cleanup_status=1
+  fi
   if [ -n "$HEY_PID" ]; then
     stop_tracked_hey || cleanup_status=1
   fi
@@ -295,10 +332,13 @@ restore_prewarmed_demo() {
 run_instance_age_trial() {
   local label=$1
   local observation_file=$2
-  local hey_output=$3
-  local baseline_instance observer_status=0 hey_status=0
+  local metric_file=$3
+  local hey_output=$4
+  local baseline_instance observer_status=0 hey_status=0 metric_status=0
   HEY_FAILURE=0
   HEY_STATUS=0
+  METRIC_FAILURE=0
+  METRIC_STATUS=0
 
   if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance')
@@ -308,6 +348,13 @@ run_instance_age_trial() {
   fi
 
   echo "$label 기준 instance: $baseline_instance"
+  python3 "$REPO_DIR/scripts/observe_scaling_metric.py" \
+    --resource "$APP_ID" \
+    --duration 240 \
+    --poll-interval 30 \
+    --output "$metric_file" &
+  METRIC_OBSERVER_PID=$!
+
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$hey_output" &
   HEY_PID=$!
 
@@ -330,10 +377,18 @@ run_instance_age_trial() {
     else
       hey_status=$?
     fi
+    if stop_tracked_metric_observer; then
+      metric_status=0
+    else
+      metric_status=$?
+    fi
     HEY_STATUS=$hey_status
+    METRIC_STATUS=$metric_status
     if [ "$hey_status" -ne 0 ]; then
       HEY_FAILURE=1
-      echo "$label observer와 hey 부하가 동시에 실패했습니다 (observer=$observer_status, hey=$hey_status)." >&2
+    fi
+    if [ "$metric_status" -ne 0 ]; then
+      METRIC_FAILURE=1
     fi
     return "$observer_status"
   fi
@@ -348,43 +403,62 @@ run_instance_age_trial() {
     HEY_FAILURE=1
     echo "$label hey 부하가 실패했습니다 (exit=$hey_status)." >&2
   fi
+
+  if wait "$METRIC_OBSERVER_PID"; then
+    metric_status=0
+  else
+    metric_status=$?
+  fi
+  METRIC_OBSERVER_PID=""
+  METRIC_STATUS=$metric_status
+  if [ "$metric_status" -ne 0 ]; then
+    METRIC_FAILURE=1
+    echo "$label AutomaticScalingInstanceCount 관찰이 실패했습니다 (exit=$metric_status)." >&2
+  fi
   return "$observer_status"
 }
 
 handle_trial_observations() {
   local label=$1
   local observation_file=$2
-  local observer_status=$3
-  local observer_message
+  local metric_file=$3
+  local observer_status=$4
 
-  if [ "$HEY_FAILURE" = "1" ]; then
+  if [ "$HEY_FAILURE" = "1" ] || [ "$METRIC_FAILURE" = "1" ]; then
     if ! restore_prewarmed_demo; then
-      echo "[07] ${label} hey 부하가 실패했고 복원에도 실패했습니다." >&2
+      echo "[07] ${label} 실행 실패 후 복원에도 실패했습니다." >&2
     fi
-    if [ "$observer_status" -ne 0 ]; then
-      case "$observer_status" in
-        1) observer_message="관찰 도구가 오류로 종료했습니다." ;;
-        2) observer_message="새 instance를 관찰하지 못했습니다." ;;
-        3) observer_message="baseline ID acquisition failed." ;;
-        *) observer_message="관찰 도구가 예상하지 못한 상태로 종료했습니다." ;;
-      esac
-      echo "[07] ${label} ${observer_message} (observer exit=${observer_status})와 hey 부하 (exit=${HEY_STATUS})가 동시에 실패했습니다. 복원 및 검증 후 시험을 중단합니다." >&2
-    else
-      echo "[07] ${label} hey 부하가 실패했습니다. 복원 및 검증 후 시험을 중단합니다." >&2
-    fi
+    echo "[07] ${label} 실패: observer=${observer_status}, hey=${HEY_STATUS}, metric=${METRIC_STATUS}. 복원 및 검증 후 시험을 중단합니다." >&2
     return 1
   fi
 
   case "$observer_status" in
     0)
-      if jq -e 'type == "array" and length > 0' "$observation_file" >/dev/null 2>&1; then
-        return 0
+      if ! jq -e 'type == "array" and length > 0' "$observation_file" >/dev/null 2>&1; then
+        if ! restore_prewarmed_demo; then
+          echo "[07] ${label} 관찰 JSON 검증 실패 후 복원에도 실패했습니다." >&2
+        fi
+        echo "[07] ${label} 관찰 도구가 유효한 JSON 배열을 남기지 못했습니다." >&2
+        return 1
       fi
-      if ! restore_prewarmed_demo; then
-        echo "[07] ${label} 관찰 도구가 유효한 JSON 배열을 남기지 못했고 복원에도 실패했습니다." >&2
+      if ! jq -e '
+        (.metric == "AutomaticScalingInstanceCount") and
+        (((try (.trial_started_at | fromdateiso8601) catch null) | type) == "number") and
+        (.samples | type == "array" and length > 0) and
+        (.samples | all(
+          (((try (.metric_timestamp | fromdateiso8601) catch null) | type) == "number") and
+          (((try (.observed_at | fromdateiso8601) catch null) | type) == "number") and
+          (.instance_count | type == "number")
+        ))
+      ' "$metric_file" >/dev/null 2>&1
+      then
+        if ! restore_prewarmed_demo; then
+          echo "[07] ${label} metric JSON 검증 실패 후 복원에도 실패했습니다." >&2
+        fi
+        echo "[07] ${label} AutomaticScalingInstanceCount 결과가 유효하지 않습니다." >&2
+        return 1
       fi
-      echo "[07] ${label} 관찰 도구가 유효한 JSON 배열을 남기지 못했습니다. 오류를 확인한 뒤 3단계부터 다시 시도하세요." >&2
-      return 1
+      return 0
       ;;
     1)
       if ! restore_prewarmed_demo; then
@@ -457,6 +531,8 @@ fi
 
 NO_PREWARM_OBSERVATIONS="$TMP_DIR/prewarmed-0-observations.json"
 PREWARM_OBSERVATIONS="$TMP_DIR/prewarmed-1-observations.json"
+NO_PREWARM_METRICS="$TMP_DIR/prewarmed-0-instance-count.json"
+PREWARM_METRICS="$TMP_DIR/prewarmed-1-instance-count.json"
 
 if ! set_prewarmed_configuration 0
 then
@@ -479,12 +555,14 @@ if ! wait_for_single_instance "$A_TRANSITION_AT"; then
 fi
 
 observer_status=0
-if run_instance_age_trial "Prewarmed=0" "$NO_PREWARM_OBSERVATIONS" "$TMP_DIR/hey-burst-0.out"; then
+if run_instance_age_trial "Prewarmed=0" "$NO_PREWARM_OBSERVATIONS" \
+  "$NO_PREWARM_METRICS" "$TMP_DIR/hey-burst-0.out"; then
   observer_status=0
 else
   observer_status=$?
 fi
-if handle_trial_observations "시험 A" "$NO_PREWARM_OBSERVATIONS" "$observer_status"; then
+if handle_trial_observations "시험 A" "$NO_PREWARM_OBSERVATIONS" \
+  "$NO_PREWARM_METRICS" "$observer_status"; then
   :
 else
   exit 1
@@ -521,16 +599,32 @@ if ! wait_for_single_instance "$B_TRANSITION_AT"; then
   exit 1
 fi
 observer_status=0
-if run_instance_age_trial "Prewarmed=1" "$PREWARM_OBSERVATIONS" "$TMP_DIR/hey-burst-1.out"; then
+if run_instance_age_trial "Prewarmed=1" "$PREWARM_OBSERVATIONS" \
+  "$PREWARM_METRICS" "$TMP_DIR/hey-burst-1.out"; then
   observer_status=0
 else
   observer_status=$?
 fi
-if handle_trial_observations "시험 B" "$PREWARM_OBSERVATIONS" "$observer_status"; then
+if handle_trial_observations "시험 B" "$PREWARM_OBSERVATIONS" \
+  "$PREWARM_METRICS" "$observer_status"; then
   :
 else
   exit 1
 fi
+
+printf 'trial\ttrial_started_at\tmetric_timestamp\tobserved_at\tinstance_count\n'
+jq -r --arg trial "Prewarmed=0" '
+  .trial_started_at as $started |
+  .samples[] |
+  [$trial, $started, .metric_timestamp, .observed_at, (.instance_count | tostring)] |
+  @tsv
+' "$NO_PREWARM_METRICS"
+jq -r --arg trial "Prewarmed=1" '
+  .trial_started_at as $started |
+  .samples[] |
+  [$trial, $started, .metric_timestamp, .observed_at, (.instance_count | tostring)] |
+  @tsv
+' "$PREWARM_METRICS"
 
 printf 'trial\tinstance\tstarted_at\tfirst_seen_at\tfirst_response_age\n'
 jq -r '.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv' \
