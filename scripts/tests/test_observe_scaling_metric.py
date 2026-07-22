@@ -187,6 +187,40 @@ def test_observe_fails_when_the_final_query_does_not_recover(monkeypatch):
         raise AssertionError("MetricQueryError was not raised")
 
 
+def test_observe_records_observed_at_after_metric_fetch(monkeypatch):
+    clock = iter([0.0, 0.0])
+    fetched = False
+    now_calls = 0
+
+    def now():
+        nonlocal now_calls
+        now_calls += 1
+        if now_calls == 1:
+            return utc("2026-07-22T01:03:00Z")
+        assert fetched is True
+        return utc("2026-07-22T01:03:05Z")
+
+    def fetch(resource, start_time):
+        nonlocal fetched
+        fetched = True
+        return metric_payload(
+            {"timeStamp": "2026-07-22T01:02:00Z", "maximum": 2}
+        )
+
+    monkeypatch.setattr(osm.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(osm, "_now", now)
+
+    started_at, samples = osm.observe(
+        "resource",
+        duration=0,
+        poll_interval=30,
+        fetcher=fetch,
+    )
+
+    assert started_at == utc("2026-07-22T01:03:00Z")
+    assert samples[0]["observed_at"] == "2026-07-22T01:03:05Z"
+
+
 def test_main_writes_atomic_output_and_returns_0_1_and_2(
     monkeypatch, tmp_path, capsys
 ):

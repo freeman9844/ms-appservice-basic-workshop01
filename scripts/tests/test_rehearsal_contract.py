@@ -28,6 +28,18 @@ def test_rehearsal_preserves_hey_failures_and_stops_tracked_pid():
     assert "HEY_STATUS=$hey_status" in REHEARSAL
     assert 'if [ "$hey_status" -ne 0 ]; then' in REHEARSAL
     assert 'wait "$HEY_PID" || true' not in REHEARSAL
+    assert (
+        'echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"'
+        in DOCS
+    )
+    assert (
+        "시험 A 실패: 세 결과를 비교하지 말고 6단계의 복원 명령을 실행하세요."
+        in DOCS
+    )
+    assert (
+        "시험 B 실패: 세 결과를 비교하지 말고 6단계의 복원 명령을 실행하세요."
+        in DOCS
+    )
 
 
 def test_baseline_id_acquisition_is_distinct_from_observer_failure():

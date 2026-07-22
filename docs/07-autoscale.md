@@ -224,6 +224,8 @@ AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
 mkdir -p "$AB_DIR"
 NO_PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-0-observations.json"
 PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-1-observations.json"
+NO_PREWARM_METRICS="$AB_DIR/prewarmed-0-instance-count.json"
+PREWARM_METRICS="$AB_DIR/prewarmed-1-instance-count.json"
 
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 --output none &&
@@ -288,7 +290,7 @@ az rest --method get \
 }
 ```
 
-> 👁️ `InstanceCount` 메트릭은 시험 시작 전·시험 사이에 단일 인스턴스 기준 상태를 확인하는 용도로만 사용합니다. 실제 관찰값은 `observe_instances.py`가 저장하는 `started_at`, `first_seen_at`, `first_response_age`입니다.
+> 👁️ `InstanceCount`는 시험 시작 전·시험 사이의 단일 인스턴스 기준 상태 확인에만 사용합니다. 각 시험 중에는 `AutomaticScalingInstanceCount`를 30초마다 조회해 1분 단위 capacity 변화를 별도 JSON으로 저장하고, `observe_instances.py`는 실제 응답에 나타난 새 instance의 `started_at`, `first_seen_at`, `first_response_age`를 기록합니다.
 
 
 ## 4단계 — 시험 A: Prewarmed=0
@@ -340,35 +342,48 @@ az monitor metrics list \
 > 👁️ **시험 A 명령 흐름**
 >
 > 1. `curl`과 `jq`로 `/api/info` 응답에서 현재 기준 instance ID를 가져옵니다. ID를 얻지 못하면 `if`의 `else`로 이동하므로 부하와 observer는 시작되지 않습니다.
-> 2. `hey -z 180s -c 100 -q 10`은 180초 동안 최대 100개 동시 worker를 사용하고 worker당 초당 10개 요청으로 `/api/info`에 부하를 보냅니다. `&`로 백그라운드 실행하며 요약 결과는 `$AB_DIR/hey-burst-0.out`에 저장합니다.
-> 3. `HEY_PID=$!`는 방금 백그라운드로 시작한 `hey`의 PID를 저장합니다. 뒤의 `wait "$HEY_PID"`가 정확한 부하 프로세스의 완료와 종료 상태를 확인할 때 사용합니다.
-> 4. `observe_instances.py`는 기준 instance를 제외하고 180초 동안 `--concurrency 30`으로 응답을 관찰하며, 각 요청은 `--request-timeout 5`로 제한합니다. 발견한 새 instance의 타임라인은 `$NO_PREWARM_OBSERVATIONS` JSON에 저장합니다.
-> 5. observer가 끝나면 `wait`로 `hey` 종료까지 기다리고 각각의 상태를 `OBSERVER_STATUS`와 `HEY_STATUS`에 저장합니다. 두 exit code가 모두 0일 때만 시험 A를 성공으로 보고 시험 B로 진행합니다.
+> 2. `observe_scaling_metric.py`는 `AutomaticScalingInstanceCount`를 30초마다 최대 240초 관찰합니다. 180초 부하가 끝난 뒤에도 Azure Monitor 수집 지연을 위해 최대 60초 더 기다리며, 화면과 `$NO_PREWARM_METRICS` JSON에 기록합니다.
+> 3. `hey -z 180s -c 100 -q 10`은 180초 동안 최대 100개 동시 worker를 사용하고 worker당 초당 10개 요청으로 `/api/info`에 부하를 보냅니다. `&`로 백그라운드 실행하며 요약 결과는 `$AB_DIR/hey-burst-0.out`에 저장합니다.
+> 4. `METRIC_PID=$!`와 `HEY_PID=$!`는 각 백그라운드 프로세스의 PID를 저장합니다. 뒤의 `wait`가 정확한 프로세스의 완료와 종료 상태를 확인할 때 사용합니다.
+> 5. `observe_instances.py`는 기준 instance를 제외하고 180초 동안 `--concurrency 30`으로 응답을 관찰하며, 각 요청은 `--request-timeout 5`로 제한합니다. 발견한 새 instance의 타임라인은 `$NO_PREWARM_OBSERVATIONS` JSON에 저장합니다.
+> 6. instance observer가 끝나면 `hey`와 metric observer를 차례로 기다리고 `OBSERVER_STATUS`, `HEY_STATUS`, `METRIC_STATUS`를 확인합니다. 세 exit code가 모두 0일 때만 시험 A를 성공으로 보고 시험 B로 진행합니다.
 
 ```bash
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
   echo "Prewarmed=0 기준 instance: $BASELINE_INSTANCE"
 
+  python3 "$REPO_DIR/scripts/observe_scaling_metric.py" \
+    --resource "$APP_ID" \
+    --duration 240 \
+    --poll-interval 30 \
+    --output "$NO_PREWARM_METRICS" &
+  METRIC_PID=$!
+
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
     > "$AB_DIR/hey-burst-0.out" &
   HEY_PID=$!
 
-  python3 "$REPO_DIR/scripts/observe_instances.py" \
+  if python3 "$REPO_DIR/scripts/observe_instances.py" \
     --url "$APP_URL/api/info" \
     --baseline-instance "$BASELINE_INSTANCE" \
     --duration 180 \
     --concurrency 30 \
     --request-timeout 5 \
     --output "$NO_PREWARM_OBSERVATIONS"
-  OBSERVER_STATUS=$?
+  then
+    OBSERVER_STATUS=0
+  else
+    OBSERVER_STATUS=$?
+    kill "$HEY_PID" "$METRIC_PID" 2>/dev/null || true
+  fi
 
-  wait "$HEY_PID"
-  HEY_STATUS=$?
+  if wait "$HEY_PID"; then HEY_STATUS=0; else HEY_STATUS=$?; fi
+  if wait "$METRIC_PID"; then METRIC_STATUS=0; else METRIC_STATUS=$?; fi
 
-  echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
-  if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
-    echo "시험 A 실패: 다음 시험으로 진행하지 말고 6단계의 복원 명령을 실행하세요." >&2
+  echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
+  if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
+    echo "시험 A 실패: 세 결과를 비교하지 말고 6단계의 복원 명령을 실행하세요." >&2
     false
   fi
 else
@@ -377,7 +392,7 @@ else
 fi
 ```
 
-> ⚠️ `observer exit=0, hey exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되면 새 instance를 관찰하지 못한 것이므로 6단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 복원 후 3단계부터 다시 시도합니다.
+> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 6단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 3단계부터 다시 시도합니다.
 
 📋 **예상 출력** (2026-07-21 리허설 예시)
 
@@ -443,35 +458,48 @@ az rest --method get \
 > 👁️ **시험 B 명령 흐름**
 >
 > 1. 시험 A와 같은 순서로 `curl`과 `jq`를 사용해 현재 기준 instance ID를 확보합니다. 차이는 앞 단계에서 Prewarmed=1로 설정했다는 점이며, ID 확보 실패 시 부하를 시작하지 않습니다.
-> 2. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 부하 조건은 동일하게 유지하고 출력 파일만 `$AB_DIR/hey-burst-1.out`을 사용합니다.
-> 3. `HEY_PID=$!`에 Trial B `hey` 프로세스의 PID를 저장하여 뒤의 `wait "$HEY_PID"`가 해당 프로세스의 완료와 종료 상태를 정확히 확인하도록 합니다.
-> 4. `observe_instances.py`는 기준 instance를 제외하고 `--concurrency 30`, `--request-timeout 5` 조건으로 새 instance를 관찰합니다. 결과는 Trial B 전용 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
-> 5. observer와 `hey`가 모두 끝난 뒤 두 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 결과를 비교하지 않고 6단계 복원 명령을 실행합니다.
+> 2. `observe_scaling_metric.py`는 시험 A와 동일하게 `AutomaticScalingInstanceCount`를 30초마다 최대 240초 관찰하고 `$PREWARM_METRICS` JSON에 저장합니다.
+> 3. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 부하 조건은 동일하게 유지하고 출력 파일만 `$AB_DIR/hey-burst-1.out`을 사용합니다.
+> 4. `METRIC_PID=$!`와 `HEY_PID=$!`에 Trial B의 백그라운드 프로세스 PID를 저장하여 뒤의 `wait`가 각 완료와 종료 상태를 정확히 확인하도록 합니다.
+> 5. `observe_instances.py`는 기준 instance를 제외하고 `--concurrency 30`, `--request-timeout 5` 조건으로 새 instance를 관찰합니다. 결과는 Trial B 전용 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
+> 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 6단계 복원 명령을 실행합니다.
 
 ```bash
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
   echo "Prewarmed=1 기준 instance: $BASELINE_INSTANCE"
 
+  python3 "$REPO_DIR/scripts/observe_scaling_metric.py" \
+    --resource "$APP_ID" \
+    --duration 240 \
+    --poll-interval 30 \
+    --output "$PREWARM_METRICS" &
+  METRIC_PID=$!
+
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
     > "$AB_DIR/hey-burst-1.out" &
   HEY_PID=$!
 
-  python3 "$REPO_DIR/scripts/observe_instances.py" \
+  if python3 "$REPO_DIR/scripts/observe_instances.py" \
     --url "$APP_URL/api/info" \
     --baseline-instance "$BASELINE_INSTANCE" \
     --duration 180 \
     --concurrency 30 \
     --request-timeout 5 \
     --output "$PREWARM_OBSERVATIONS"
-  OBSERVER_STATUS=$?
+  then
+    OBSERVER_STATUS=0
+  else
+    OBSERVER_STATUS=$?
+    kill "$HEY_PID" "$METRIC_PID" 2>/dev/null || true
+  fi
 
-  wait "$HEY_PID"
-  HEY_STATUS=$?
+  if wait "$HEY_PID"; then HEY_STATUS=0; else HEY_STATUS=$?; fi
+  if wait "$METRIC_PID"; then METRIC_STATUS=0; else METRIC_STATUS=$?; fi
 
-  echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
-  if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
-    echo "시험 B 실패: 결과를 해석하지 말고 6단계의 복원 명령을 실행하세요." >&2
+  echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
+  if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
+    echo "시험 B 실패: 세 결과를 비교하지 말고 6단계의 복원 명령을 실행하세요." >&2
     false
   fi
 else
@@ -480,7 +508,7 @@ else
 fi
 ```
 
-> ⚠️ `observer exit=0, hey exit=0`일 때만 결과를 해석합니다.
+> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 결과를 해석합니다.
 
 📋 **예상 출력** (2026-07-21 리허설 예시)
 
@@ -498,6 +526,36 @@ bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 ## 6단계 — 결과 해석 및 정리
 
 두 시험 모두에서 새 instance가 관찰되었다면, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
+
+🟢 **실행 — AutomaticScalingInstanceCount 타임라인 출력**
+
+> 👁️ `trial_started_at`은 metric observer를 시작한 시험 orchestration 시각입니다. 각 `metric_timestamp`는 Azure Monitor의 1분 집계 구간이고, `observed_at`은 해당 값을 CLI에서 처음 확인한 시각입니다. 이 시각들을 다음 instance 표의 `first_seen_at`과 나란히 비교합니다.
+
+```bash
+printf 'trial\ttrial_started_at\tmetric_timestamp\tobserved_at\tinstance_count\n'
+jq -r --arg trial "Prewarmed=0" '
+  .trial_started_at as $started |
+  .samples[] |
+  [$trial, $started, .metric_timestamp, .observed_at, (.instance_count | tostring)] |
+  @tsv
+' "$NO_PREWARM_METRICS"
+jq -r --arg trial "Prewarmed=1" '
+  .trial_started_at as $started |
+  .samples[] |
+  [$trial, $started, .metric_timestamp, .observed_at, (.instance_count | tostring)] |
+  @tsv
+' "$PREWARM_METRICS"
+```
+
+📋 **예상 출력 형식** (시각과 count는 실행마다 달라지는 예시)
+
+```text
+trial	trial_started_at	metric_timestamp	observed_at	instance_count
+Prewarmed=0	2026-07-22T01:02:03Z	2026-07-22T01:02:00Z	2026-07-22T01:02:34Z	1
+Prewarmed=0	2026-07-22T01:02:03Z	2026-07-22T01:03:00Z	2026-07-22T01:03:35Z	4
+Prewarmed=1	2026-07-22T01:12:10Z	2026-07-22T01:12:00Z	2026-07-22T01:12:40Z	2
+Prewarmed=1	2026-07-22T01:12:10Z	2026-07-22T01:13:00Z	2026-07-22T01:13:41Z	3
+```
 
 🟢 **실행 — 결과 표 출력**
 
@@ -562,6 +620,14 @@ Prewarmed=1	2	23	23	0
 ### 무엇이 Prewarmed의 이점인가
 
 Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)는 Prewarmed instance를 HTTP scale·activation 시 사용하는 **warmed capacity buffer**로 설명합니다. 목적은 모든 확장 시간을 일정하게 보장하는 것이 아니라, 새 처리 용량이 필요할 때 처음부터 준비하는 cold-start 부담을 줄여 확장 전환을 더 부드럽게 만드는 것입니다.
+
+### capacity 증가와 새 응답 instance를 함께 보는 법
+
+1. `trial_started_at`으로 시험 orchestration이 시작된 구간을 확인합니다.
+2. `AutomaticScalingInstanceCount`가 이전 값보다 증가한 첫 `metric_timestamp`를 찾습니다.
+3. instance 표의 `first_seen_at`과 나란히 보며 capacity 증가 구간 뒤에 새 instance 응답이 언제 관찰됐는지 확인합니다.
+
+`AutomaticScalingInstanceCount`는 배포된 Prewarmed instance를 포함할 수 있지만 active와 Prewarmed를 구분하지 않고 instance ID도 제공하지 않습니다. 또한 `PT1M` 집계와 Azure Monitor 수집 지연이 있으므로 `metric_timestamp`를 Azure 내부의 정확한 activation 시각으로 해석할 수 없습니다. 응답에서 관찰된 instance 수가 적다는 사실도 capacity 효율 향상을 의미하지 않습니다. 이 타임라인은 warmed capacity buffer의 동작 방향을 이해하기 위한 보조 증거이며 인과관계 증명은 아닙니다.
 
 ### 이번 실측에서 보인 이점
 

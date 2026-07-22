@@ -407,7 +407,7 @@ def test_trial_observation_explanations_describe_command_flow():
                 "`--concurrency 30`",
                 "`--request-timeout 5`",
                 "`$NO_PREWARM_OBSERVATIONS`",
-                "두 exit code가 모두 0",
+                "세 exit code가 모두 0",
             ],
         ),
         (
@@ -423,7 +423,7 @@ def test_trial_observation_explanations_describe_command_flow():
                 "`--concurrency 30`",
                 "`--request-timeout 5`",
                 "`$PREWARM_OBSERVATIONS`",
-                "두 exit code가 모두 0",
+                "세 exit code가 모두 0",
             ],
         ),
     ]
@@ -519,11 +519,13 @@ def test_trial_observation_runs_only_after_baseline_capture_succeeds():
         assert failure_message in command_block, label
         assert "false" in command_block, label
 
-        then_branch = command_block.split("then", 1)[1].split("else", 1)[0]
-        else_branch = command_block.split("else", 1)[1].split("fi", 1)[0]
+        outer_else = f"else\n  {failure_message}\n"
+        then_branch = command_block.split("then", 1)[1].split(outer_else, 1)[0]
+        else_branch = command_block.split(outer_else, 1)[1].rsplit("fi", 1)[0]
 
         assert 'hey -z 180s -c 100 -q 10 "$APP_URL/api/info"' in then_branch, label
         assert 'python3 "$REPO_DIR/scripts/observe_instances.py"' in then_branch, label
+        assert 'kill "$HEY_PID" "$METRIC_PID" 2>/dev/null || true' in then_branch, label
         assert 'hey -z 180s -c 100 -q 10 "$APP_URL/api/info"' not in else_branch, label
         assert 'python3 "$REPO_DIR/scripts/observe_instances.py"' not in else_branch, label
 
@@ -556,3 +558,80 @@ def test_health_polling_blocks_fail_after_final_attempt_without_sleeping():
 
     for label, command_block, failure_message in health_contracts:
         assert_health_polling_contract(command_block, failure_message), label
+
+
+def test_trials_record_automatic_scaling_instance_count():
+    text = DOC.read_text(encoding="utf-8")
+    step_three = section(
+        text,
+        "## 3단계 — Prewarmed A/B 비교 준비",
+        "## 4단계 — 시험 A",
+    )
+    step_four = section(
+        text,
+        "## 4단계 — 시험 A",
+        "## 5단계 — scale-in 게이트 후 시험 B",
+    )
+    step_five = section(
+        text,
+        "## 5단계 — scale-in 게이트 후 시험 B",
+        "## 6단계 — 결과 해석 및 정리",
+    )
+
+    assert (
+        'NO_PREWARM_METRICS="$AB_DIR/prewarmed-0-instance-count.json"'
+        in step_three
+    )
+    assert (
+        'PREWARM_METRICS="$AB_DIR/prewarmed-1-instance-count.json"'
+        in step_three
+    )
+
+    for label, block, marker, output in [
+        (
+            "Trial A",
+            step_four,
+            "🟢 **실행 — 시험 A 관찰**",
+            "$NO_PREWARM_METRICS",
+        ),
+        (
+            "Trial B",
+            step_five,
+            "🟢 **실행 — 시험 B 관찰**",
+            "$PREWARM_METRICS",
+        ),
+    ]:
+        command = code_block_after(block, marker)
+        metric = 'python3 "$REPO_DIR/scripts/observe_scaling_metric.py"'
+        load = 'hey -z 180s -c 100 -q 10 "$APP_URL/api/info"'
+        assert metric in command, label
+        assert '--resource "$APP_ID"' in command, label
+        assert "--duration 240" in command, label
+        assert "--poll-interval 30" in command, label
+        assert f'--output "{output}"' in command, label
+        assert command.index(metric) < command.index(load), label
+        assert "METRIC_PID=$!" in command, label
+        assert 'wait "$METRIC_PID"' in command, label
+        assert "METRIC_STATUS=$?" in command, label
+        assert "metric exit=$METRIC_STATUS" in command, label
+
+
+def test_step_six_prints_and_limits_metric_timeline():
+    text = DOC.read_text(encoding="utf-8")
+    step_six = section(
+        text,
+        "## 6단계 — 결과 해석 및 정리",
+        "## 검증",
+    )
+
+    assert "🟢 **실행 — AutomaticScalingInstanceCount 타임라인 출력**" in step_six
+    assert "trial_started_at" in step_six
+    assert "metric_timestamp" in step_six
+    assert "observed_at" in step_six
+    assert "instance_count" in step_six
+    assert "`PT1M`" in step_six
+    assert "active와 Prewarmed를 구분하지" in step_six
+    assert "instance ID" in step_six
+    assert "정확한 activation 시각" in step_six
+    assert "capacity 효율" in step_six
+    assert "보조 증거" in step_six

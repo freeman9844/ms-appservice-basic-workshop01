@@ -146,9 +146,9 @@ def observe(resource, duration, poll_interval, fetcher=fetch_metric):
 
     print("metric_timestamp\tobserved_at\tinstance_count", flush=True)
     while True:
-        observed_at = _now()
         try:
             payload = fetcher(resource, query_start)
+            observed_at = _now()
             last_error = None
             for sample in parse_metric_samples(payload, observed_at, earliest):
                 if store.upsert(sample):
