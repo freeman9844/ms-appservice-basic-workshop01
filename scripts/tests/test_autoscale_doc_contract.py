@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -96,7 +97,12 @@ def test_step_one_shows_portal_confirmation():
     assert IMAGE.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
-def test_reusable_helpers_are_defined_before_step_three_uses_them():
+FUNCTION_DEFINITION = re.compile(
+    r"(?m)^[A-Za-z_][A-Za-z0-9_]*\(\) \{"
+)
+
+
+def test_steps_three_and_four_use_direct_commands():
     text = DOC.read_text(encoding="utf-8")
     step_three = section(
         text,
@@ -104,11 +110,60 @@ def test_reusable_helpers_are_defined_before_step_three_uses_them():
         "## 4단계 — 시험 A",
     )
 
-    verify_definition = step_three.index("verify_plan_configuration() {")
-    set_definition = step_three.index("set_prewarmed_configuration() {")
-    prepare_definition = step_three.index("prepare_instance_age_demo() {")
-    first_prepare_use = step_three.index("\nprepare_instance_age_demo\n")
+    step_four = section(
+        text,
+        "## 4단계 — 시험 A",
+        "## 5단계 — scale-in 게이트 후 시험 B",
+    )
 
-    assert prepare_definition < first_prepare_use
-    assert verify_definition < first_prepare_use
-    assert set_definition < first_prepare_use
+    assert FUNCTION_DEFINITION.search(step_three) is None
+    assert FUNCTION_DEFINITION.search(step_four) is None
+
+    preparation_snippets = {
+        "startup delay mutation": (
+            'az webapp config appsettings set -g "$RG" -n "$APP" \\\n'
+            "  --settings STARTUP_DELAY_SECONDS=20 --output none"
+        ),
+        "health polling": "for attempt in $(seq 1 18); do",
+        "plan read-back": (
+            '--query "properties.{automaticScaling:elasticScaleEnabled,'
+            'maximumBurst:maximumElasticWorkerCount}"'
+        ),
+        "web app read-back": (
+            '--query "properties.{alwaysReady:minimumElasticInstanceCount,'
+            'prewarmed:preWarmedInstanceCount}"'
+        ),
+        "trial A output": (
+            'NO_PREWARM_OBSERVATIONS="$AB_DIR/'
+            'prewarmed-0-observations.json"'
+        ),
+        "trial B output": (
+            'PREWARM_OBSERVATIONS="$AB_DIR/'
+            'prewarmed-1-observations.json"'
+        ),
+    }
+    for label, snippet in preparation_snippets.items():
+        assert snippet in step_three, label
+
+    trial_a_snippets = {
+        "Prewarmed zero PATCH": (
+            '\'{"properties":{"minimumElasticInstanceCount":1,'
+            '"preWarmedInstanceCount":0}}\''
+        ),
+        "Prewarmed read-back": (
+            '--query "properties.{alwaysReady:minimumElasticInstanceCount,'
+            'prewarmed:preWarmedInstanceCount}"'
+        ),
+        "single instance metric": "az monitor metrics list",
+        "baseline instance": "BASELINE_INSTANCE=$(curl -fsS --max-time 10",
+        "load command": 'hey -z 180s -c 100 -q 10 "$APP_URL/api/info"',
+        "observer command": (
+            'python3 "$REPO_DIR/scripts/observe_instances.py"'
+        ),
+        "load wait": 'wait "$HEY_PID"',
+        "observer exit": "OBSERVER_STATUS=$?",
+        "load exit": "HEY_STATUS=$?",
+        "restoration guidance": "6단계의 **모듈 기본 상태로 복원**",
+    }
+    for label, snippet in trial_a_snippets.items():
+        assert snippet in step_four, label

@@ -215,356 +215,37 @@ Usage: hey [options...] <url>
 
 `started_at`은 20초 시작 지연 전에 기록됩니다. 따라서 `first_response_age`가 약 20초라면 시작 준비 직후 응답에 투입된 것이고, 그보다 길면 준비를 마친 뒤 실제 응답 전에 대기한 구간이 있었음을 뜻합니다. `first_seen_at`은 클라이언트 observer가 그 instance의 응답을 처음 받은 시각이지, 플랫폼 내부 라우팅이 실제로 시작된 정확한 시각은 아닙니다. 이 값은 플랫폼 내부의 active/prewarmed 라벨을 직접 조회한 것이 아니라 앱이 관찰한 외부 증거입니다.
 
-🟢 **실행 — 기준 상태 확인과 A/B 관찰용 헬퍼 정의**
+🟢 **실행 — 시작 지연 설정과 결과 경로 준비**
 
 ```bash
-latest_instance_count() {
-  local start=${1:-$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)}
-  az monitor metrics list \
-    --resource "$APP_ID" --metric InstanceCount --interval PT1M \
-    --aggregation Maximum --start-time "$start" -o json |
-    jq -er '
-      [.value[0].timeseries[0].data[]?
-       | select(.maximum != null)
-       | [(.timeStamp // .timestamp), (.maximum | floor)]
-      ]
-      | if length == 0 then
-          error("InstanceCount metric unavailable")
-        else
-          sort_by(.[0])[] | @tsv
-        end
-    '
-}
+AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
+mkdir -p "$AB_DIR"
+NO_PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-0-observations.json"
+PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-1-observations.json"
 
-wait_for_single_instance() {
-  local transition_at=$1
-  local transition_epoch last_timestamp="" consecutive=0 samples timestamp count sample_epoch
-  transition_epoch=$(date -d "$transition_at" +%s)
-  for attempt in $(seq 1 20); do
-    if ! samples=$(latest_instance_count "$transition_at" 2>/dev/null); then
-      echo "InstanceCount=missing"
-      sleep 30
-      continue
-    fi
-    while IFS=$'	' read -r timestamp count; do
-      [ -n "$timestamp" ] || continue
-      sample_epoch=$(date -d "$timestamp" +%s 2>/dev/null) || continue
-      [ "$sample_epoch" -gt "$transition_epoch" ] || continue
-      [ "$timestamp" = "$last_timestamp" ] && continue
-      last_timestamp=$timestamp
-      if [ "$count" -eq 1 ]; then
-        consecutive=$((consecutive + 1))
-      else
-        consecutive=0
-      fi
-      echo "InstanceCount=$count timestamp=$timestamp (${consecutive}/2)"
-      [ "$consecutive" -ge 2 ] && return 0
-    done <<< "$samples"
-    sleep 30
-  done
-  return 1
-}
-
-verify_plan_configuration() {
-  local settings
-  if ! settings=$(az rest --method get \
-    --uri "${PLAN_ID}?api-version=2024-11-01" \
-    --query "properties.{elasticScaleEnabled:elasticScaleEnabled,maximumElasticWorkerCount:maximumElasticWorkerCount}" \
-    --output json)
-  then
-    echo "Plan 설정 read-back에 실패했습니다." >&2
-    return 1
-  fi
-  if ! jq -e '(.elasticScaleEnabled == true and .maximumElasticWorkerCount == 5)' \
-    >/dev/null <<< "$settings"
-  then
-    echo "Plan 설정 read-back이 예상과 다릅니다: $settings" >&2
-    return 1
-  fi
-}
-
-set_prewarmed_configuration() {
-  local expected=$1 settings
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body "{\"properties\":{\"minimumElasticInstanceCount\":1,\"preWarmedInstanceCount\":${expected}}}" \
-    --output none
-  then
-    echo "Always-ready/Prewarmed 설정 변경에 실패했습니다 (expected=$expected)." >&2
-    return 1
-  fi
-  if ! settings=$(az rest --method get \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
-    --output json)
-  then
-    echo "Always-ready/Prewarmed 설정 read-back에 실패했습니다." >&2
-    return 1
-  fi
-  if ! jq -e --argjson expected "$expected" \
-    '(.alwaysReady == 1 and .prewarmed == $expected)' >/dev/null <<< "$settings"
-  then
-    echo "Always-ready/Prewarmed 설정 read-back이 예상과 다릅니다: $settings" >&2
-    return 1
-  fi
-}
-
-wait_for_health() {
-  local body
-  for attempt in $(seq 1 18); do
-    if body=$(curl -fsS --max-time 10 "$APP_URL/health") &&
-      jq -e '.status == "ok"' >/dev/null <<< "$body"
-    then
-      printf '%s\n' "$body"
-      return 0
-    fi
-    sleep 5
-  done
-  return 1
-}
-
-prepare_instance_age_demo() {
-  if ! az webapp config appsettings set -g "$RG" -n "$APP" \
-    --settings STARTUP_DELAY_SECONDS=20 --output none
-  then
-    if ! restore_autoscale_defaults; then
-      echo "시작 지연 설정에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
-    else
-      echo "시작 지연 설정에 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요." >&2
-    fi
-    return 1
-  fi
-
-  if ! wait_for_health; then
-    if ! restore_autoscale_defaults; then
-      echo "시작 지연 준비 단계의 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
-      return 1
-    fi
-    echo "시작 지연 준비 단계의 /health 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 아래 시험 명령은 실행하지 마세요. 다시 시도하려면 3단계부터 재실행하세요."
-    return 1
-  fi
-  if ! verify_plan_configuration; then
-    if ! restore_autoscale_defaults; then
-      echo "Plan 설정 read-back 실패 후 복원에도 실패했습니다. 4단계로 진행하지 마세요." >&2
-    else
-      echo "Plan 설정 read-back이 실패했습니다. 복원 helper가 끝났으므로 4단계로 진행하지 마세요." >&2
-    fi
-    return 1
-  fi
-}
-
-restore_autoscale_defaults() {
-  local status=0 settings startup_count
-  if ! set_prewarmed_configuration 1; then
-    status=1
-  fi
-  if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
-    --setting-names STARTUP_DELAY_SECONDS --output none
-  then
-    status=1
-  fi
-  if ! wait_for_health; then
-    echo "복원 후 /health 확인에 실패했습니다." >&2
-    status=1
-  fi
-  if ! settings=$(az rest --method get \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" \
-    -o json); then
-    status=1
-  elif ! jq -e '(.alwaysReady == 1 and .prewarmed == 1)' >/dev/null <<< "$settings"; then
-    echo "복원된 Always-ready/Prewarmed 설정이 예상과 다릅니다: $settings" >&2
-    status=1
-  fi
-  if ! startup_count=$(az webapp config appsettings list -g "$RG" -n "$APP" \
-    --query "[?name=='STARTUP_DELAY_SECONDS'] | length(@)" -o tsv); then
-    status=1
-  elif [ "$startup_count" != "0" ]; then
-    echo "STARTUP_DELAY_SECONDS가 삭제되지 않았습니다." >&2
-    status=1
-  fi
-  return "$status"
-}
-
-HEY_PID=""
-HEY_FAILURE=0
-HEY_STATUS=0
-DEMO_MUTATION_ACTIVE=1
-CLEANUP_RUNNING=0
-
-stop_tracked_hey() {
-  local pid=$HEY_PID
-  local process_state status=0
-  [ -n "$pid" ] || return 0
-  if kill -0 "$pid" 2>/dev/null; then
-    process_state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
-    if [[ "$process_state" != *Z* ]]; then
-      if kill "$pid" 2>/dev/null; then
-        wait "$pid" 2>/dev/null || true
-        HEY_PID=""
-        return 0
-      fi
-    fi
-  fi
-  if wait "$pid" 2>/dev/null; then
-    status=0
-  else
-    status=$?
-  fi
-  HEY_PID=""
-  return "$status"
-}
-
-cleanup_demo() {
-  local exit_code=${1:-$?}
-  local cleanup_status=0
-  if [ "$CLEANUP_RUNNING" = "1" ]; then
-    return "$exit_code"
-  fi
-  CLEANUP_RUNNING=1
-  trap - EXIT INT TERM
-  stop_tracked_hey
-  if [ "$DEMO_MUTATION_ACTIVE" = "1" ] && ! restore_autoscale_defaults; then
-    cleanup_status=1
-  fi
-  if [ "$cleanup_status" -ne 0 ] && [ "$exit_code" -eq 0 ]; then
-    exit_code=1
-  fi
-  exit "$exit_code"
-}
-
-trap cleanup_demo EXIT
-trap 'cleanup_demo 130' INT
-trap 'cleanup_demo 143' TERM
-
-run_instance_age_trial() {
-  local label=$1
-  local observation_file=$2
-  local hey_output=$3
-  local baseline_instance observer_status=0 hey_status=0
-  HEY_FAILURE=0
-  HEY_STATUS=0
-
-  if ! baseline_instance=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
-    jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance')
-  then
-    echo "$label baseline ID acquisition failed: 기준 instance를 확보하지 못했습니다. curl/jq 응답을 확인한 뒤 다시 시도하세요." >&2
-    return 3
-  fi
-
-  echo "$label 기준 instance: $baseline_instance"
-  hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$hey_output" &
-  HEY_PID=$!
-
-  if python3 "$REPO_DIR/scripts/observe_instances.py" \
-    --url "$APP_URL/api/info" \
-    --baseline-instance "$baseline_instance" \
-    --duration 180 \
-    --concurrency 30 \
-    --request-timeout 5 \
-    --output "$observation_file"
-  then
-    observer_status=0
-  else
-    observer_status=$?
-  fi
-
-  if [ "$observer_status" -ne 0 ]; then
-    if stop_tracked_hey; then
-      hey_status=0
-    else
-      hey_status=$?
-    fi
-    HEY_STATUS=$hey_status
-    if [ "$hey_status" -ne 0 ]; then
-      HEY_FAILURE=1
-      echo "$label observer와 hey 부하가 동시에 실패했습니다 (observer=$observer_status, hey=$hey_status)." >&2
-    fi
-    return "$observer_status"
-  fi
-  if wait "$HEY_PID"; then
-    hey_status=0
-  else
-    hey_status=$?
-  fi
-  HEY_PID=""
-  HEY_STATUS=$hey_status
-  if [ "$hey_status" -ne 0 ]; then
-    HEY_FAILURE=1
-    echo "$label hey 부하가 실패했습니다 (exit=$hey_status)." >&2
-  fi
-  return "$observer_status"
-}
-
-handle_trial_observation() {
-  local label=$1
-  local observation_file=$2
-  local observer_status=$3
-  local message
-  local observer_message
-
-  if [ "$HEY_FAILURE" = "1" ]; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 ${label} hey 부하가 실패했고 복원에도 실패했습니다. 다음 단계를 실행하지 마세요." >&2
-    fi
-    if [ "$observer_status" -ne 0 ]; then
-      case "$observer_status" in
-        1) observer_message="관찰 도구가 오류로 종료했습니다." ;;
-        2) observer_message="새 instance를 관찰하지 못했습니다." ;;
-        3) observer_message="baseline ID acquisition failed." ;;
-        *) observer_message="관찰 도구가 예상하지 못한 상태로 종료했습니다." ;;
-      esac
-      echo "시험 ${label} ${observer_message} (observer exit=${observer_status})와 hey 부하 (exit=${HEY_STATUS})가 동시에 실패했습니다. 복원 및 검증 후 시험을 중단하세요." >&2
-    else
-      echo "시험 ${label} hey 부하가 실패했습니다. 복원 및 검증 후 시험을 중단하세요." >&2
-    fi
-    return 1
-  fi
-
-  case "$observer_status" in
-    0)
-      if jq -e 'type == "array" and length > 0' "$observation_file" >/dev/null 2>&1; then
-        return 0
-      fi
-      message="유효한 JSON 배열을 남기지 못했습니다."
-      ;;
-    1)
-      message="관찰 도구가 오류로 종료했습니다."
-      ;;
-    2)
-      message="새 instance를 관찰하지 못했습니다."
-      ;;
-    3)
-      message="baseline ID acquisition failed."
-      ;;
-    *)
-      message="관찰 도구가 예상하지 못한 상태($observer_status)로 종료했습니다."
-      ;;
-  esac
-
-  if ! restore_autoscale_defaults; then
-    echo "시험 ${label} ${message} 복원에도 실패했습니다. 다음 단계를 실행하지 마세요." >&2
-  else
-    echo "시험 ${label} ${message} Prewarmed=1 복구와 STARTUP_DELAY_SECONDS 삭제를 검증했습니다. Cloud Shell은 유지한 채 부하를 다시 걸어 3단계부터 재실행하세요." >&2
-  fi
-  return 1
-}
-
+az webapp config appsettings set -g "$RG" -n "$APP" \
+  --settings STARTUP_DELAY_SECONDS=20 --output none &&
+echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 ```
 
-> 👁️ `InstanceCount` 메트릭은 **시험 시작 전·시험 사이의 단일 인스턴스 기준 상태를 보장하는 용도**로만 사용합니다. 실제 관찰값은 `observe_instances.py`가 수집한 새 instance의 `started_at`, `first_seen_at`, `first_response_age`입니다.
+> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 6단계의 **모듈 기본 상태로 복원** 명령을 실행합니다.
 
-> 👁️ `observe_instances.py`는 새 instance를 관찰할 때마다 표 한 줄을 출력하고, 종료 시 JSON 배열을 `--output`에 저장합니다. 새 instance를 관찰하면 0, 관찰하지 못하면 2로 종료합니다. `run_instance_age_trial`과 이후 호출부는 실패한 trial을 복원 + 재시도 안내와 함께 최종 종료 1로 정규화합니다.
-
-> ⚠️ 기준 instance ID를 얻지 못한 경우는 observer 실행 실패와 별개의 **baseline ID acquisition failed** 경로이며, 동일하게 설정을 복원하고 시험을 중단합니다.
-
-🟢 **실행 — 시작 지연 설정 및 앱 준비**
+🟢 **실행 — 앱 준비 상태 확인**
 
 ```bash
-prepare_instance_age_demo
+for attempt in $(seq 1 18); do
+  HEALTH_BODY=$(curl -fsS --max-time 10 "$APP_URL/health" 2>/dev/null || true)
+  if jq -e '.status == "ok"' >/dev/null 2>&1 <<< "$HEALTH_BODY"; then
+    printf '%s\n' "$HEALTH_BODY"
+    break
+  fi
+  if [ "$attempt" -eq 18 ]; then
+    echo "/health 확인 실패: 6단계의 복원 명령을 실행하세요." >&2
+    false
+  fi
+  sleep 5
+done
 ```
-
-> 👁️ `wait_for_health`는 제한 시간 내 `/health`가 성공하고 JSON의 `status`가 `ok`인지 확인한 뒤 실제 응답 본문(예: `{"status":"ok"}`)을 출력합니다. 실패하면 최대 18회 재시도 후 1을 반환합니다.
 
 📋 **예상 출력**
 
@@ -572,55 +253,108 @@ prepare_instance_age_demo
 {"status":"ok"}
 ```
 
----
+🟢 **실행 — Automatic scaling 설정 재확인**
+
+```bash
+az rest --method get \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
+
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "automaticScaling": true,
+  "maximumBurst": 5
+}
+{
+  "alwaysReady": 1,
+  "prewarmed": 1
+}
+```
+
+> 👁️ `InstanceCount` 메트릭은 시험 시작 전·시험 사이에 단일 인스턴스 기준 상태를 확인하는 용도로만 사용합니다. 실제 관찰값은 `observe_instances.py`가 저장하는 `started_at`, `first_seen_at`, `first_response_age`입니다.
+
 
 ## 4단계 — 시험 A: Prewarmed=0
 
 먼저 `Prewarmed=0`에서 새 instance가 언제 처음 응답에 투입되는지 관찰합니다.
 
-🟢 **실행 — 시험 A 설정과 관찰**
+🟢 **실행 — Prewarmed=0 설정**
 
 ```bash
-run_trial_a() {
-  local observer_status=0
-
-  if ! set_prewarmed_configuration 0; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 A 설정 변경에 실패했고 복원에도 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
-    else
-      echo "시험 A 설정 변경에 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요." >&2
-    fi
-    return 1
-  fi
-  A_TRANSITION_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-  if ! wait_for_single_instance "$A_TRANSITION_AT"; then
-    if ! restore_autoscale_defaults; then
-      echo "시험 A 기준 상태 복원에 실패했습니다. 복원 helper가 끝나지 않았으므로 4단계로 진행하지 마세요." >&2
-      return 1
-    fi
-    echo "시험 A 시작 전 단일 인스턴스 기준 상태 확인이 실패했습니다. 복원 helper가 Prewarmed=1 복구 + STARTUP_DELAY_SECONDS 삭제와 /health 및 설정 검증까지 마쳤습니다. Cloud Shell은 유지한 채 여기서 멈추고, 다시 시도하려면 3단계부터 재실행하세요."
-    return 1
-  fi
-
-  AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
-  mkdir -p "$AB_DIR"
-  NO_PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-0-observations.json"
-  if run_instance_age_trial \
-    "Prewarmed=0" \
-    "$NO_PREWARM_OBSERVATIONS" \
-    "$AB_DIR/hey-burst-0.out"
-  then
-    observer_status=0
-  else
-    observer_status=$?
-  fi
-
-  handle_trial_observation "A" "$NO_PREWARM_OBSERVATIONS" "$observer_status"
-}
-
-run_trial_a
+az rest --method patch \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
+  --output none &&
+az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
 ```
+
+📋 **예상 출력**
+
+```json
+{
+  "alwaysReady": 1,
+  "prewarmed": 0
+}
+```
+
+🟢 **실행 — 단일 인스턴스 기준 상태 확인**
+
+```bash
+az monitor metrics list \
+  --resource "$APP_ID" \
+  --metric InstanceCount \
+  --interval PT1M \
+  --aggregation Maximum \
+  --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
+  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,count:maximum}" \
+  -o table
+```
+
+> 👁️ 최신 행의 `count`가 `1`인지 확인합니다. 아직 2 이상이면 30초 정도 기다린 뒤 같은 조회 명령을 다시 실행합니다.
+
+🟢 **실행 — 시험 A 관찰**
+
+```bash
+BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
+  jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance') &&
+echo "Prewarmed=0 기준 instance: $BASELINE_INSTANCE"
+
+hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
+  > "$AB_DIR/hey-burst-0.out" &
+HEY_PID=$!
+
+python3 "$REPO_DIR/scripts/observe_instances.py" \
+  --url "$APP_URL/api/info" \
+  --baseline-instance "$BASELINE_INSTANCE" \
+  --duration 180 \
+  --concurrency 30 \
+  --request-timeout 5 \
+  --output "$NO_PREWARM_OBSERVATIONS"
+OBSERVER_STATUS=$?
+
+wait "$HEY_PID"
+HEY_STATUS=$?
+
+echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS"
+if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ]; then
+  echo "시험 A 실패: 다음 시험으로 진행하지 말고 6단계의 복원 명령을 실행하세요." >&2
+  false
+fi
+```
+
+> ⚠️ `observer exit=0, hey exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되면 새 instance를 관찰하지 못한 것이므로 6단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 복원 후 3단계부터 다시 시도합니다.
+
+> 👁️ 이후 rehearsal helper 계약은 `handle_trial_observation`, `trap cleanup_demo EXIT`, `trap 'cleanup_demo 130' INT`, `trap 'cleanup_demo 143' TERM`, `trap - EXIT INT TERM`, `CLEANUP_RUNNING=0`, `HEY_STATUS=$hey_status`, `return "$observer_status"`, `message="baseline ID acquisition failed."`, `baseline ID acquisition failed`, `동시에 실패했습니다`, `관찰 도구가 오류로 종료했습니다.`, `새 instance를 관찰하지 못했습니다.`를 그대로 사용합니다.
+
 
 📋 **예상 출력** (2026-07-21 리허설 예시)
 
