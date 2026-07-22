@@ -21,7 +21,7 @@
 ## 공통 상태 — 항상 실행
 
 > 🟢 이 줄은 같은 터미널로 이어서 진행하든, 새 Cloud Shell에서 다시 시작하든 먼저 실행합니다.
-> `REPO_DIR`는 이후 모든 헬퍼가 쓰는 고정 경로이므로 여기서 항상 정의합니다.
+> `REPO_DIR`는 `scripts/observe_instances.py`의 경로를 고정하기 위해 여기서 항상 정의합니다.
 
 ```bash
 REPO_DIR="$HOME/ms-appservice-basic-workshop01"
@@ -217,6 +217,8 @@ Usage: hey [options...] <url>
 
 🟢 **실행 — 시작 지연 설정과 결과 경로 준비**
 
+> 👁️ 두 시험의 결과를 저장할 디렉터리와 JSON 파일 경로를 먼저 준비하고, 새 프로세스의 시작 지연을 관찰할 수 있도록 `STARTUP_DELAY_SECONDS=20`을 앱 설정에 추가합니다.
+
 ```bash
 AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
 mkdir -p "$AB_DIR"
@@ -231,6 +233,8 @@ echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 > ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 6단계의 **모듈 기본 상태로 복원** 명령을 실행합니다.
 
 🟢 **실행 — 앱 준비 상태 확인**
+
+> 👁️ 앱 설정 변경으로 프로세스가 재시작될 수 있으므로 `/health`를 최대 18회 확인합니다. 응답 JSON의 `status`가 `ok`일 때만 다음 명령으로 진행합니다.
 
 ```bash
 HEALTH_CHECK_STATUS=1
@@ -258,6 +262,8 @@ fi
 ```
 
 🟢 **실행 — Automatic scaling 설정 재확인**
+
+> 👁️ Plan에서는 Automatic scaling과 Maximum burst를, Web App에서는 Always-ready와 Prewarmed 값을 다시 조회합니다. 각각 `true`·`5`와 `1`·`1`인지 확인합니다.
 
 ```bash
 az rest --method get \
@@ -291,6 +297,8 @@ az rest --method get \
 
 🟢 **실행 — Prewarmed=0 설정**
 
+> 👁️ 시험 A 조건을 만들기 위해 Always-ready는 1로 유지하고 Prewarmed만 0으로 변경합니다. PATCH 직후 같은 설정을 조회하여 `prewarmed=0`이 반영됐는지 확인합니다.
+
 ```bash
 az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
@@ -312,6 +320,8 @@ az rest --method get \
 
 🟢 **실행 — 단일 인스턴스 기준 상태 확인**
 
+> 👁️ 최근 10분의 `InstanceCount` Maximum 값을 1분 간격으로 조회합니다. 최신 행이 `count=1`이면 이전 확장이 정리된 단일 인스턴스 기준 상태입니다.
+
 ```bash
 az monitor metrics list \
   --resource "$APP_ID" \
@@ -326,6 +336,8 @@ az monitor metrics list \
 > 👁️ 최신 행의 `count`가 `1`인지 확인합니다. 아직 2 이상이면 30초 정도 기다린 뒤 같은 조회 명령을 다시 실행합니다.
 
 🟢 **실행 — 시험 A 관찰**
+
+> 👁️ 현재 응답 중인 기준 instance를 먼저 기록한 뒤 `hey`로 180초간 부하를 보내고, observer는 기준 instance를 제외한 새 instance의 최초 응답 시점을 JSON에 저장합니다. 완료 후 observer와 `hey`의 exit code가 모두 0인지 확인합니다.
 
 ```bash
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
@@ -382,6 +394,8 @@ d09f4aa4	2026-07-21T06:37:20Z	2026-07-21T06:37:50Z	30
 
 🟢 **실행 — 시험 B 시작 전 단일 인스턴스 기준 상태 확인**
 
+> 👁️ 시험 A 부하로 늘어난 인스턴스가 scale-in됐는지 다시 확인합니다. 최신 메트릭이 `count=1`이 된 뒤에만 시험 B를 시작합니다.
+
 ```bash
 az monitor metrics list \
   --resource "$APP_ID" \
@@ -396,6 +410,8 @@ az monitor metrics list \
 > 👁️ 최신 행의 `count`가 `1`이 될 때까지 30초 정도 간격으로 같은 명령을 다시 실행합니다. 별도의 prime 부하나 `InstanceCount>=2` 확인은 하지 않습니다.
 
 🟢 **실행 — Prewarmed=1 설정**
+
+> 👁️ 시험 B 조건을 만들기 위해 Prewarmed를 1로 되돌리고 즉시 조회합니다. 출력에서 Always-ready와 Prewarmed가 모두 1인지 확인합니다.
 
 ```bash
 az rest --method patch \
@@ -417,6 +433,8 @@ az rest --method get \
 ```
 
 🟢 **실행 — 시험 B 관찰**
+
+> 👁️ 시험 A와 동일하게 기준 instance를 확보한 뒤 180초 부하와 observer를 실행하며, 이번에는 새 instance 관찰 결과를 Prewarmed=1 JSON에 저장합니다. 두 프로세스의 exit code가 모두 0이어야 결과 비교를 진행합니다.
 
 ```bash
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
@@ -471,6 +489,8 @@ bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 
 🟢 **실행 — 결과 표 출력**
 
+> 👁️ 두 JSON 파일을 읽어 Trial A와 B의 instance별 시작·최초 응답 시각을 하나의 TSV 표로 출력합니다. 이 표는 관찰 타임라인을 비교하기 위한 것이며 단일 실행의 속도 승자를 계산하지 않습니다.
+
 ```bash
 jq -r '
   ["trial","instance","started_at","first_seen_at","first_response_age"],
@@ -503,7 +523,7 @@ Prewarmed=1	bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 
 🟢 **실행 — 모듈 기본 상태로 복원**
 
-> 👁️ 시험 A 또는 B가 실패했을 때도 아래 블록을 즉시 실행할 수 있습니다.
+> 👁️ Always-ready=1과 Prewarmed=1로 되돌리고, 관찰을 위해 추가한 `STARTUP_DELAY_SECONDS`를 삭제합니다. 시험 A 또는 B가 실패했을 때도 이 복원 블록을 즉시 실행할 수 있습니다.
 
 ```bash
 az rest --method patch \
@@ -516,6 +536,8 @@ echo "Always-ready=1, Prewarmed=1 복원 및 STARTUP_DELAY_SECONDS 삭제 완료
 ```
 
 🟢 **실행 — 복원 후 앱 준비 확인**
+
+> 👁️ 설정 복원으로 앱 프로세스가 다시 시작될 수 있으므로 `/health`를 최대 18회 확인합니다. 응답 JSON의 `status`가 `ok`가 아니면 다음 모듈로 진행하지 않습니다.
 
 ```bash
 HEALTH_CHECK_STATUS=1
@@ -537,6 +559,8 @@ fi
 ```
 
 🟢 **실행 — 복원 상태 조회**
+
+> 👁️ Plan과 Web App 설정을 차례로 조회하고 `STARTUP_DELAY_SECONDS`가 남아 있는지도 확인합니다. Automatic scaling·Maximum burst·Always-ready·Prewarmed가 종료 상태와 일치하고 설정 개수가 0이어야 합니다.
 
 ```bash
 az rest --method get \

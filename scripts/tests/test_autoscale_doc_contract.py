@@ -19,6 +19,12 @@ def code_block_after(text, marker):
     return after_marker.split("```bash", 1)[1].split("```", 1)[0]
 
 
+def explanation_before_bash(text, marker):
+    between = text.split(marker, 1)[1].split("```bash", 1)[0]
+    assert "> 👁️" in between, marker
+    return between
+
+
 def assert_health_polling_contract(command_block, failure_message):
     assert "HEALTH_CHECK_STATUS=1" in command_block
     assert "for attempt in $(seq 1 18); do" in command_block
@@ -271,6 +277,108 @@ def test_steps_five_and_six_use_direct_commands():
     }
     for label, snippet in restoration_snippets.items():
         assert snippet in step_six, label
+
+
+def test_steps_three_through_six_explain_each_execution_block():
+    text = DOC.read_text(encoding="utf-8")
+    step_three = section(
+        text,
+        "## 3단계 — Prewarmed A/B 비교 준비",
+        "## 4단계 — 시험 A",
+    )
+    step_four = section(
+        text,
+        "## 4단계 — 시험 A",
+        "## 5단계 — scale-in 게이트 후 시험 B",
+    )
+    step_five = section(
+        text,
+        "## 5단계 — scale-in 게이트 후 시험 B",
+        "## 6단계 — 결과 해석 및 정리",
+    )
+    step_six = section(
+        text,
+        "## 6단계 — 결과 해석 및 정리",
+        "## 검증",
+    )
+
+    contracts = [
+        (
+            step_three,
+            "🟢 **실행 — 시작 지연 설정과 결과 경로 준비**",
+            ["STARTUP_DELAY_SECONDS=20", "JSON"],
+        ),
+        (
+            step_three,
+            "🟢 **실행 — 앱 준비 상태 확인**",
+            ["최대 18회", "status", "ok"],
+        ),
+        (
+            step_three,
+            "🟢 **실행 — Automatic scaling 설정 재확인**",
+            ["Maximum burst", "Always-ready", "Prewarmed"],
+        ),
+        (
+            step_four,
+            "🟢 **실행 — Prewarmed=0 설정**",
+            ["Prewarmed", "0", "조회"],
+        ),
+        (
+            step_four,
+            "🟢 **실행 — 단일 인스턴스 기준 상태 확인**",
+            ["최근 10분", "1분", "count=1"],
+        ),
+        (
+            step_four,
+            "🟢 **실행 — 시험 A 관찰**",
+            ["기준 instance", "180초", "새 instance", "exit code"],
+        ),
+        (
+            step_five,
+            "🟢 **실행 — 시험 B 시작 전 단일 인스턴스 기준 상태 확인**",
+            ["시험 A", "scale-in", "count=1"],
+        ),
+        (
+            step_five,
+            "🟢 **실행 — Prewarmed=1 설정**",
+            ["Prewarmed", "1", "조회"],
+        ),
+        (
+            step_five,
+            "🟢 **실행 — 시험 B 관찰**",
+            ["기준 instance", "180초", "새 instance", "exit code"],
+        ),
+        (
+            step_six,
+            "🟢 **실행 — 결과 표 출력**",
+            ["두 JSON", "TSV", "승자"],
+        ),
+        (
+            step_six,
+            "🟢 **실행 — 모듈 기본 상태로 복원**",
+            ["Always-ready=1", "Prewarmed=1", "STARTUP_DELAY_SECONDS"],
+        ),
+        (
+            step_six,
+            "🟢 **실행 — 복원 후 앱 준비 확인**",
+            ["최대 18회", "status", "ok"],
+        ),
+        (
+            step_six,
+            "🟢 **실행 — 복원 상태 조회**",
+            ["Plan", "Web App", "STARTUP_DELAY_SECONDS"],
+        ),
+    ]
+
+    for block, marker, required_terms in contracts:
+        explanation = explanation_before_bash(block, marker)
+        for term in required_terms:
+            assert term in explanation, (marker, term)
+
+    assert (
+        "`REPO_DIR`는 `scripts/observe_instances.py`의 경로를 고정하기 위해 "
+        "여기서 항상 정의합니다."
+    ) in text
 
 
 def test_trial_observation_runs_only_after_baseline_capture_succeeds():
