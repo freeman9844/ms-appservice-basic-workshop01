@@ -62,16 +62,18 @@ def test_step_three_uses_log_analytics_results_image():
     assert (ROOT / "docs/images/08-log-analytics-kql-results.png").is_file()
 
 
-def test_step_four_uses_application_insights_live_metrics_image():
-    image_reference = (
-        "![Application Insights Live Metrics에서 요청 텔레메트리 확인]"
-        "(images/08-application-insights-live-metrics.png)"
-    )
+def test_step_four_uses_managed_python_instrumentation():
+    observability_main = main_content(OBSERVABILITY)
+    step_four = observability_main.split(
+        "## 4단계 — App Service 관리형 Application Insights 활성화", 1
+    )[1]
 
-    assert image_reference in OBSERVABILITY
-    assert (
-        ROOT / "docs/images/08-application-insights-live-metrics.png"
-    ).is_file()
+    assert "ApplicationInsightsAgent_EXTENSION_VERSION=~3" in step_four
+    assert "APPLICATIONINSIGHTS_CONNECTION_STRING" in step_four
+    assert "AI_SETTINGS_OK=" in step_four
+    assert "App Service Python 자동 계측" in step_four
+    assert "Live Metrics를 지원하지 않습니다" in step_four
+    assert "08-application-insights-live-metrics.png" not in OBSERVABILITY
 
 
 def test_app_insights_requests_use_workspace_query_in_cloud_shell():
@@ -101,7 +103,7 @@ def test_cloud_shell_msi_error_explains_workspace_query_path():
 def test_step_four_waits_for_restart_and_telemetry_ingestion():
     observability_main = main_content(OBSERVABILITY)
     step_four = observability_main.split(
-        "## 4단계 — App Insights 커넥션 스트링 주입", 1
+        "## 4단계 — App Service 관리형 Application Insights 활성화", 1
     )[1]
 
     assert "HEALTH_CHECK_STATUS=1" in step_four
@@ -117,7 +119,7 @@ def test_step_four_waits_for_restart_and_telemetry_ingestion():
 def test_step_four_demonstrates_application_insights_diagnostics():
     observability_main = main_content(OBSERVABILITY)
     step_four = observability_main.split(
-        "## 4단계 — App Insights 커넥션 스트링 주입", 1
+        "## 4단계 — App Service 관리형 Application Insights 활성화", 1
     )[1]
 
     assert 'curl -fsS "$APP_URL/api/info"' in step_four
@@ -130,5 +132,16 @@ def test_step_four_demonstrates_application_insights_diagnostics():
     assert "**Performance**" in step_four
     assert "**Failures**" in step_four
     assert "End-to-end transaction details" in step_four
-    assert "Application Map" in step_four
+    assert "Application map" in step_four
     assert "단일 노드" in step_four
+
+
+def test_managed_instrumentation_portal_guidance_is_explicit():
+    observability_main = main_content(OBSERVABILITY)
+
+    assert "App Service → **Application Insights**" in observability_main
+    assert "Enabled" in observability_main
+    assert "**Performance**" in observability_main
+    assert "**Failures**" in observability_main
+    assert "**Transaction search**" in observability_main
+    assert "**Application map**" in observability_main

@@ -6,14 +6,14 @@
 
 ## 목표
 
-이 모듈에서는 Azure App Service의 **진단 설정**을 구성하여 플랫폼 로그를 Log Analytics 워크스페이스(LAW)로 전송하고, KQL 쿼리로 HTTP 액세스 패턴을 분석합니다. 이어서 **App Insights 커넥션 스트링**을 앱 설정으로 주입하여 Flask 앱에 내장된 OpenTelemetry SDK 기반 텔레메트리를 활성화합니다.
+이 모듈에서는 Azure App Service의 **진단 설정**을 구성하여 플랫폼 로그를 Log Analytics 워크스페이스(LAW)로 전송하고, KQL 쿼리로 HTTP 액세스 패턴을 분석합니다. 이어서 Azure CLI로 **App Service 관리형 Application Insights**를 활성화하여 앱 코드 변경 없이 Flask 요청 텔레메트리를 수집합니다.
 
 - App Service 진단 설정을 구성하여 HTTP 로그·콘솔 로그·플랫폼 로그를 LAW로 전송합니다.
 - 인위적인 HTTP 트래픽을 발생시키고 KQL로 액세스 패턴을 분석합니다.
-- `APPLICATIONINSIGHTS_CONNECTION_STRING` 앱 설정을 주입하여 Flask 앱의 OpenTelemetry SDK를 활성화합니다.
+- App Service 관리형 Python 에이전트를 활성화하여 Flask 요청을 자동 계측합니다.
 - workspace 기반 `AppRequests` 테이블 KQL로 애플리케이션 텔레메트리를 확인합니다.
 - 진단 설정(플랫폼 로그)과 App Insights(앱 텔레메트리)의 역할 차이를 이해합니다.
-- 모듈 종료 상태: **진단 설정 활성, APPLICATIONINSIGHTS_CONNECTION_STRING 주입 완료**.
+- 모듈 종료 상태: **진단 설정 활성, App Service 관리형 Application Insights 활성**.
 
 ---
 
@@ -51,13 +51,13 @@ Azure에서 웹앱 가시성을 확보하는 경로는 두 가지입니다.
 
 | 비교 항목 | **진단 설정(플랫폼 로그)** | **App Insights(앱 텔레메트리)** |
 |---|---|---|
-| 수집 주체 | **Azure 플랫폼** | **앱 내 SDK(OpenTelemetry)** |
+| 수집 주체 | **Azure 플랫폼** | **App Service 관리형 Python 에이전트** |
 | 주요 데이터 | HTTP 액세스·콘솔·플랫폼 이벤트 | 요청·의존성·예외·트레이스·커스텀 메트릭 |
 | 저장 위치 | Log Analytics 워크스페이스 | Application Insights 리소스 |
-| 활성화 방법 | 진단 설정 구성 | 앱 설정 `APPLICATIONINSIGHTS_CONNECTION_STRING` 주입 |
-| Linux Python 제약 | 없음 | **codeless 자동 계측 미지원 → SDK 내장 필수** |
+| 활성화 방법 | 진단 설정 구성 | 앱 설정 2개로 App Service 자동 계측 활성화 |
+| Linux Python 제약 | 없음 | Python 3.9–3.13 Deploy as Code 지원, 사용자 지정 컨테이너 미지원 |
 
-> 👁️ 이 워크숍의 Flask 앱에는 `azure-monitor-opentelemetry` SDK가 이미 내장되어 있습니다. 커넥션 스트링을 환경 변수로 전달하면 계측이 즉시 켜집니다(데이터가 조회 가능해지기까지는 수 분 소요). 외부 의존성이 없으므로 **Application map은 단일 노드가 정상**입니다.
+> 👁️ 이 워크숍은 Linux App Service의 Python 3.12 Deploy as Code 환경이므로 관리형 자동 계측 지원 범위에 해당합니다. 앱 코드에는 Application Insights SDK를 포함하지 않으며, App Service가 Flask 요청을 자동 계측합니다. 외부 의존성이 없으므로 **Application map은 단일 노드가 정상**입니다.
 
 ---
 
@@ -128,17 +128,35 @@ AppServiceHTTPLogs
 
 ---
 
-## 4단계 — App Insights 커넥션 스트링 주입
+## 4단계 — App Service 관리형 Application Insights 활성화
 
-🟢 **실행** — 01 모듈에서 설치한 `application-insights` 확장을 사용해 커넥션 스트링을 앱 설정으로 주입합니다.
+🟢 **실행** — 01 모듈에서 설치한 `application-insights` 확장으로 커넥션 스트링을 조회하고, Linux용 App Service 관리형 Python 에이전트(`~3`)를 함께 활성화합니다.
 
 ```bash
-AI_CONN=$(az monitor app-insights component show -g $RG --app $APPI --query connectionString -o tsv)
+AI_CONN=$(az monitor app-insights component show \
+  -g $RG --app $APPI --query connectionString -o tsv)
+
 az webapp config appsettings set -g $RG -n $APP \
-  --settings APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN"
+  --settings \
+    APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN" \
+    ApplicationInsightsAgent_EXTENSION_VERSION=~3
 ```
 
-> 👁️ 앱 설정 변경은 앱을 자동 재시작합니다. `/health`가 다시 정상 응답한 뒤에만 트래픽을 생성합니다. 준비 확인 없이 `curl -s`를 바로 실행하면 재시작 중 요청 실패가 숨겨져 텔레메트리가 생성되지 않을 수 있습니다.
+🟢 **실행** — 커넥션 스트링 값은 출력하지 않고, 두 필수 설정이 존재하는지만 확인합니다.
+
+```bash
+AI_SETTINGS_OK=$(az webapp config appsettings list -g $RG -n $APP \
+  --query "[?name=='APPLICATIONINSIGHTS_CONNECTION_STRING' && value!='' ||
+             name=='ApplicationInsightsAgent_EXTENSION_VERSION' && value=='~3'] |
+            length(@)" -o tsv)
+
+if [ "$AI_SETTINGS_OK" -ne 2 ]; then
+  echo "Application Insights 관리형 에이전트 설정 확인 실패" >&2
+  false
+fi
+```
+
+> 👁️ `APPLICATIONINSIGHTS_CONNECTION_STRING`은 대상 리소스를 지정하고, `ApplicationInsightsAgent_EXTENSION_VERSION=~3`은 App Service Python 자동 계측을 켭니다. 앱 설정 변경은 앱을 자동 재시작합니다. `/health`가 다시 정상 응답한 뒤에만 트래픽을 생성합니다.
 
 🟢 **실행** — 앱 재시작 완료를 확인합니다.
 
@@ -233,16 +251,14 @@ GET /api/info            200           true       20          3.2       5.1
 GET /workshop-not-found  404           false      5           2.8       4.0
 ```
 
-🖼️ **예상 화면** — Azure Portal → Application Insights(`appi-appsvcworkshop-$SUFFIX`) → **Live Metrics** 블레이드에서 실시간 요청률·응답 시간·실패율을 확인합니다. 트래픽을 전송하는 동안 차트가 실시간으로 갱신됩니다.
-
-![Application Insights Live Metrics에서 요청 텔레메트리 확인](images/08-application-insights-live-metrics.png)
+> 👁️ App Service Python 자동 계측은 **Live Metrics를 지원하지 않습니다**. 요청 데이터가 `AppRequests`에 적재된 뒤 Azure Portal의 App Service → **Application Insights**에서 `Enabled` 상태를 확인하고, 연결된 Application Insights 리소스의 조사 메뉴를 사용합니다.
 
 ### Application Insights에서 추가로 확인할 내용
 
-1. **Performance** — Application Insights 메뉴의 **Investigate > Performance**에서 `GET /slow`을 선택합니다. `GET /api/info`보다 약 3초 긴 duration 분포가 보이는지 확인하고, 하단의 sample을 선택합니다.
-2. **End-to-end transaction details** — 느린 sample을 열어 요청 하나의 시간선, duration, result code, operation ID와 속성을 확인합니다. 플랫폼 Metrics의 집계값과 달리 개별 요청을 추적할 수 있다는 점이 핵심입니다.
-3. **Failures** — **Investigate > Failures**에서 `GET /workshop-not-found`와 HTTP 404가 표시되는지 확인합니다. 의도한 실패이므로 워크숍 앱 장애가 아닙니다.
-4. **Application Map** — 외부 HTTP·데이터베이스 dependency를 호출하지 않는 현재 시나리오에서는 앱 **단일 노드**만 표시되고 dependency 연결이 없는 것이 정상입니다.
+1. **Performance** — **Investigate > Performance**에서 `GET /slow`을 선택하고 `GET /api/info`보다 약 3초 긴 duration과 요청 sample을 확인합니다.
+2. **Failures** — **Investigate > Failures**에서 `GET /workshop-not-found`와 HTTP 404를 확인합니다. 의도한 실패이므로 워크숍 앱 장애가 아닙니다.
+3. **Transaction search** — 느린 요청 sample을 열어 **End-to-end transaction details**의 duration, result code, operation ID와 속성을 확인합니다.
+4. **Application map** — 외부 HTTP·데이터베이스 dependency가 없으므로 앱 **단일 노드**만 표시되는 것이 정상입니다.
 
 ---
 
@@ -309,7 +325,16 @@ az monitor log-analytics query -w $LAW_CID --analytics-query \
 
 다음 순서로 확인합니다.
 
-1. `az webapp config appsettings list -g $RG -n $APP -o table | grep APPLICATIONINSIGHTS` 로 설정이 주입되었는지 확인합니다.
+1. 다음 명령으로 커넥션 스트링이 비어 있지 않고 관리형 에이전트 버전이 `~3`인지 확인합니다.
+
+   ```bash
+   az webapp config appsettings list -g $RG -n $APP \
+     --query "[?starts_with(name, 'APPLICATIONINSIGHTS') ||
+                name=='ApplicationInsightsAgent_EXTENSION_VERSION'].[name,value]" \
+     -o table
+   ```
+
+   `APPLICATIONINSIGHTS_CONNECTION_STRING`과 `ApplicationInsightsAgent_EXTENSION_VERSION` 두 항목이 모두 필요합니다.
 2. `az webapp restart -g $RG -n $APP` 으로 앱을 재시작합니다.
 3. 트래픽을 추가로 발생시킨 뒤 최소 2–3분 대기 후 재조회합니다.
 
