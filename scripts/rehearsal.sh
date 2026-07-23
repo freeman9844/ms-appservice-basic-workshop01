@@ -190,11 +190,11 @@ latest_instance_count() {
   local start=${1:-$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)}
   az monitor metrics list \
     --resource "$APP_ID" --metric InstanceCount --interval PT1M \
-    --aggregation Maximum --start-time "$start" -o json |
+    --aggregation Average --start-time "$start" -o json |
     jq -er '
       [.value[0].timeseries[0].data[]?
-       | select(.maximum != null)
-       | [(.timeStamp // .timestamp), (.maximum | floor)]
+       | select(.average != null)
+       | [(.timeStamp // .timestamp), .average]
       ]
       | if length == 0 then
           error("InstanceCount metric unavailable")
@@ -413,7 +413,7 @@ run_instance_age_trial() {
   METRIC_STATUS=$metric_status
   if [ "$metric_status" -ne 0 ]; then
     METRIC_FAILURE=1
-    echo "$label AutomaticScalingInstanceCount 관찰이 실패했습니다 (exit=$metric_status)." >&2
+    echo "$label InstanceCount 관찰이 실패했습니다 (exit=$metric_status)." >&2
   fi
   return "$observer_status"
 }
@@ -442,7 +442,7 @@ handle_trial_observations() {
         return 1
       fi
       if ! jq -e '
-        (.metric == "AutomaticScalingInstanceCount") and
+        (.metric == "InstanceCount") and
         (((try (.trial_started_at | fromdateiso8601) catch null) | type) == "number") and
         (.samples | type == "array" and length > 0) and
         (.samples | all(
@@ -455,7 +455,7 @@ handle_trial_observations() {
         if ! restore_prewarmed_demo; then
           echo "[07] ${label} metric JSON 검증 실패 후 복원에도 실패했습니다." >&2
         fi
-        echo "[07] ${label} AutomaticScalingInstanceCount 결과가 유효하지 않습니다." >&2
+        echo "[07] ${label} InstanceCount 결과가 유효하지 않습니다." >&2
         return 1
       fi
       return 0

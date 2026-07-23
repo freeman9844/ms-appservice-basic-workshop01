@@ -26,13 +26,12 @@ def test_parse_metric_samples_accepts_valid_rows_and_rejects_invalid_rows():
     observed_at = utc("2026-07-22T01:03:30Z")
     earliest = utc("2026-07-22T01:01:00Z")
     payload = metric_payload(
-        {"timeStamp": "2026-07-22T01:00:00Z", "maximum": 1},
-        {"timeStamp": "2026-07-22T01:02:00Z", "maximum": 2.0},
-        {"timestamp": "2026-07-22T01:03:00+00:00", "maximum": 3},
-        {"timeStamp": "bad", "maximum": 4},
-        {"timeStamp": "2026-07-22T01:03:00Z", "maximum": None},
-        {"timeStamp": "2026-07-22T01:03:00Z", "maximum": 1.5},
-        {"timeStamp": "2026-07-22T01:03:00Z", "maximum": True},
+        {"timeStamp": "2026-07-22T01:00:00Z", "average": 1},
+        {"timeStamp": "2026-07-22T01:02:00Z", "average": 2.0},
+        {"timestamp": "2026-07-22T01:03:00+00:00", "average": 2.5},
+        {"timeStamp": "bad", "average": 4},
+        {"timeStamp": "2026-07-22T01:03:00Z", "average": None},
+        {"timeStamp": "2026-07-22T01:03:00Z", "average": True},
     )
 
     assert osm.parse_metric_samples(payload, observed_at, earliest) == [
@@ -44,7 +43,7 @@ def test_parse_metric_samples_accepts_valid_rows_and_rejects_invalid_rows():
         {
             "metric_timestamp": "2026-07-22T01:03:00Z",
             "observed_at": "2026-07-22T01:03:30Z",
-            "instance_count": 3,
+            "instance_count": 2.5,
         },
     ]
 
@@ -106,8 +105,8 @@ def test_observe_retries_query_errors_and_returns_samples(monkeypatch):
     responses = iter(
         [
             osm.MetricQueryError("temporary az failure"),
-            metric_payload({"timeStamp": "2026-07-22T01:02:00Z", "maximum": 2}),
-            metric_payload({"timeStamp": "2026-07-22T01:02:00Z", "maximum": 2}),
+            metric_payload({"timeStamp": "2026-07-22T01:02:00Z", "average": 2}),
+            metric_payload({"timeStamp": "2026-07-22T01:02:00Z", "average": 2}),
         ]
     )
 
@@ -165,7 +164,7 @@ def test_observe_fails_when_the_final_query_does_not_recover(monkeypatch):
     clock = iter([0.0, 0.0, 30.0])
     responses = iter(
         [
-            metric_payload({"timeStamp": "2026-07-22T01:02:00Z", "maximum": 2}),
+            metric_payload({"timeStamp": "2026-07-22T01:02:00Z", "average": 2}),
             osm.MetricQueryError("final az failure"),
         ]
     )
@@ -204,7 +203,7 @@ def test_observe_records_observed_at_after_metric_fetch(monkeypatch):
         nonlocal fetched
         fetched = True
         return metric_payload(
-            {"timeStamp": "2026-07-22T01:02:00Z", "maximum": 2}
+            {"timeStamp": "2026-07-22T01:02:00Z", "average": 2}
         )
 
     monkeypatch.setattr(osm.time, "monotonic", lambda: next(clock))
@@ -247,8 +246,8 @@ def test_main_writes_atomic_output_and_returns_0_1_and_2(
     )
     assert osm.main(args) == 0
     assert json.loads(output.read_text(encoding="utf-8")) == {
-        "metric": "AutomaticScalingInstanceCount",
-        "aggregation": "Maximum",
+        "metric": "InstanceCount",
+        "aggregation": "Average",
         "interval": "PT1M",
         "trial_started_at": "2026-07-22T01:03:00Z",
         "poll_interval_seconds": 30,
@@ -317,3 +316,24 @@ def test_fetch_metric_reports_cli_and_json_errors(monkeypatch):
         assert "invalid Azure CLI JSON" in str(error)
     else:
         raise AssertionError("MetricFatalError was not raised")
+
+
+def test_observer_uses_supported_web_app_instance_count_metric(monkeypatch):
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = '{"value":[]}'
+        stderr = ""
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        return Result()
+
+    monkeypatch.setattr(osm.subprocess, "run", run)
+
+    assert osm.METRIC_NAME == "InstanceCount"
+    assert osm.AGGREGATION == "Average"
+    assert osm.fetch_metric("resource", "2026-07-22T01:02:00Z") == {"value": []}
+    assert captured["command"][captured["command"].index("--metric") + 1] == "InstanceCount"
+    assert captured["command"][captured["command"].index("--aggregation") + 1] == "Average"

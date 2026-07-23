@@ -263,34 +263,7 @@ fi
 {"status":"ok"}
 ```
 
-🟢 **실행 — Automatic scaling 설정 재확인**
-
-> 👁️ Plan에서는 Automatic scaling과 Maximum burst를, Web App에서는 Always-ready와 Prewarmed 값을 다시 조회합니다. 각각 `true`·`5`와 `1`·`1`인지 확인합니다.
-
-```bash
-az rest --method get \
-  --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
-
-az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
-```
-
-📋 **예상 출력**
-
-```json
-{
-  "automaticScaling": true,
-  "maximumBurst": 5
-}
-{
-  "alwaysReady": 1,
-  "prewarmed": 1
-}
-```
-
-> 👁️ `InstanceCount`는 시험 시작 전·시험 사이의 단일 인스턴스 기준 상태 확인에만 사용합니다. 각 시험 중에는 `AutomaticScalingInstanceCount`를 30초마다 조회해 1분 단위 capacity 변화를 별도 JSON으로 저장하고, `observe_instances.py`는 실제 응답에 나타난 새 instance의 `started_at`, `first_seen_at`, `first_response_age`를 기록합니다.
+> 👁️ `InstanceCount`는 시험 시작 전·시험 사이의 단일 인스턴스 기준 상태 확인과 각 시험 중의 capacity 변화 관찰에 사용합니다. 시험 중에는 30초마다 조회해 1분 단위 값을 별도 JSON으로 저장하고, `observe_instances.py`는 실제 응답에 나타난 새 instance의 `started_at`, `first_seen_at`, `first_response_age`를 기록합니다.
 
 
 ## 4단계 — 시험 A: Prewarmed=0
@@ -322,16 +295,16 @@ az rest --method get \
 
 🟢 **실행 — 단일 인스턴스 기준 상태 확인**
 
-> 👁️ 최근 10분의 `InstanceCount` Maximum 값을 1분 간격으로 조회합니다. 최신 행이 `count=1`이면 이전 확장이 정리된 단일 인스턴스 기준 상태입니다.
+> 👁️ 최근 10분의 `InstanceCount` Average 값을 1분 간격으로 조회합니다. 최신 행이 `count=1`이면 이전 확장이 정리된 단일 인스턴스 기준 상태입니다.
 
 ```bash
 az monitor metrics list \
   --resource "$APP_ID" \
   --metric InstanceCount \
   --interval PT1M \
-  --aggregation Maximum \
+  --aggregation Average \
   --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,count:maximum}" \
+  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
   -o table
 ```
 
@@ -342,7 +315,7 @@ az monitor metrics list \
 > 👁️ **시험 A 명령 흐름**
 >
 > 1. `curl`과 `jq`로 `/api/info` 응답에서 현재 기준 instance ID를 가져옵니다. ID를 얻지 못하면 `if`의 `else`로 이동하므로 부하와 observer는 시작되지 않습니다.
-> 2. `observe_scaling_metric.py`는 `AutomaticScalingInstanceCount`를 30초마다 최대 240초 관찰합니다. 180초 부하가 끝난 뒤에도 Azure Monitor 수집 지연을 위해 최대 60초 더 기다리며, 화면과 `$NO_PREWARM_METRICS` JSON에 기록합니다.
+> 2. `observe_scaling_metric.py`는 Web App에서 지원되는 `InstanceCount`를 30초마다 최대 240초 관찰합니다. 180초 부하가 끝난 뒤에도 Azure Monitor 수집 지연을 위해 최대 60초 더 기다리며, 화면과 `$NO_PREWARM_METRICS` JSON에 기록합니다.
 > 3. `hey -z 180s -c 100 -q 10`은 180초 동안 최대 100개 동시 worker를 사용하고 worker당 초당 10개 요청으로 `/api/info`에 부하를 보냅니다. `&`로 백그라운드 실행하며 요약 결과는 `$AB_DIR/hey-burst-0.out`에 저장합니다.
 > 4. `METRIC_PID=$!`와 `HEY_PID=$!`는 각 백그라운드 프로세스의 PID를 저장합니다. 뒤의 `wait`가 정확한 프로세스의 완료와 종료 상태를 확인할 때 사용합니다.
 > 5. `observe_instances.py`는 기준 instance를 제외하고 180초 동안 `--concurrency 30`으로 응답을 관찰하며, 각 요청은 `--request-timeout 5`로 제한합니다. 발견한 새 instance의 타임라인은 `$NO_PREWARM_OBSERVATIONS` JSON에 저장합니다.
@@ -422,9 +395,9 @@ az monitor metrics list \
   --resource "$APP_ID" \
   --metric InstanceCount \
   --interval PT1M \
-  --aggregation Maximum \
+  --aggregation Average \
   --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,count:maximum}" \
+  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
   -o table
 ```
 
@@ -458,7 +431,7 @@ az rest --method get \
 > 👁️ **시험 B 명령 흐름**
 >
 > 1. 시험 A와 같은 순서로 `curl`과 `jq`를 사용해 현재 기준 instance ID를 확보합니다. 차이는 앞 단계에서 Prewarmed=1로 설정했다는 점이며, ID 확보 실패 시 부하를 시작하지 않습니다.
-> 2. `observe_scaling_metric.py`는 시험 A와 동일하게 `AutomaticScalingInstanceCount`를 30초마다 최대 240초 관찰하고 `$PREWARM_METRICS` JSON에 저장합니다.
+> 2. `observe_scaling_metric.py`는 시험 A와 동일하게 `InstanceCount`를 30초마다 최대 240초 관찰하고 `$PREWARM_METRICS` JSON에 저장합니다.
 > 3. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 부하 조건은 동일하게 유지하고 출력 파일만 `$AB_DIR/hey-burst-1.out`을 사용합니다.
 > 4. `METRIC_PID=$!`와 `HEY_PID=$!`에 Trial B의 백그라운드 프로세스 PID를 저장하여 뒤의 `wait`가 각 완료와 종료 상태를 정확히 확인하도록 합니다.
 > 5. `observe_instances.py`는 기준 instance를 제외하고 `--concurrency 30`, `--request-timeout 5` 조건으로 새 instance를 관찰합니다. 결과는 Trial B 전용 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
@@ -527,9 +500,9 @@ bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
 
 두 시험 모두에서 새 instance가 관찰되었다면, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
 
-🟢 **실행 — AutomaticScalingInstanceCount 타임라인 출력**
+🟢 **실행 — InstanceCount 타임라인 출력**
 
-> 👁️ `trial_started_at`은 metric observer를 시작한 시험 orchestration 시각입니다. 각 `metric_timestamp`는 Azure Monitor의 1분 집계 구간이고, `observed_at`은 해당 값을 CLI에서 처음 확인한 시각입니다. 이 시각들을 다음 instance 표의 `first_seen_at`과 나란히 비교합니다.
+> 👁️ `trial_started_at`은 metric observer를 시작한 시험 orchestration 시각입니다. 각 `metric_timestamp`는 Azure Monitor의 1분 집계 구간이고, `instance_count`는 그 구간의 Average 값이며, `observed_at`은 해당 값을 CLI에서 처음 확인한 시각입니다. 이 시각들을 다음 instance 표의 `first_seen_at`과 나란히 비교합니다.
 
 ```bash
 printf 'trial\ttrial_started_at\tmetric_timestamp\tobserved_at\tinstance_count\n'
@@ -624,10 +597,10 @@ Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.micros
 ### capacity 증가와 새 응답 instance를 함께 보는 법
 
 1. `trial_started_at`으로 시험 orchestration이 시작된 구간을 확인합니다.
-2. `AutomaticScalingInstanceCount`가 이전 값보다 증가한 첫 `metric_timestamp`를 찾습니다.
+2. `InstanceCount`가 이전 값보다 증가한 첫 `metric_timestamp`를 찾습니다.
 3. instance 표의 `first_seen_at`과 나란히 보며 capacity 증가 구간 뒤에 새 instance 응답이 언제 관찰됐는지 확인합니다.
 
-`AutomaticScalingInstanceCount`는 배포된 Prewarmed instance를 포함할 수 있지만 active와 Prewarmed를 구분하지 않고 instance ID도 제공하지 않습니다. 또한 `PT1M` 집계와 Azure Monitor 수집 지연이 있으므로 `metric_timestamp`를 Azure 내부의 정확한 activation 시각으로 해석할 수 없습니다. 응답에서 관찰된 instance 수가 적다는 사실도 capacity 효율 향상을 의미하지 않습니다. 이 타임라인은 warmed capacity buffer의 동작 방향을 이해하기 위한 보조 증거이며 인과관계 증명은 아닙니다.
+Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST API 이름은 `InstanceCount`입니다. 이 메트릭은 앱이 실행되는 VM 수를 나타내며 배포된 Prewarmed instance를 포함할 수 있지만, 개별 instance의 active/Prewarmed 상태나 instance ID는 제공하지 않습니다. 또한 `PT1M` Average 집계와 Azure Monitor 수집 지연이 있으므로 `metric_timestamp`를 Azure 내부의 정확한 activation 시각으로 해석할 수 없습니다. 응답에서 관찰된 instance 수가 적다는 사실도 capacity 효율 향상을 의미하지 않습니다. 이 타임라인은 부하 중 전체 capacity 변화 흐름을 이해하기 위한 보조 증거이며 Prewarmed 효과의 인과관계 증명은 아닙니다.
 
 ### 이번 실측에서 보인 이점
 
@@ -643,7 +616,7 @@ Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.micros
 
 - 단일 실행이며 표본 수도 4개 대 2개로 다르므로 통계적 우위나 개선 비율을 계산할 수 없습니다.
 - `first_seen_at`은 클라이언트 observer가 처음 응답을 받은 시각이며 Azure 내부의 정확한 activation·routing 시각이 아닙니다.
-- `AutomaticScalingInstanceCount`는 배포된 Prewarmed instance를 포함할 수 있지만, 개별 응답 instance의 active/Prewarmed 상태를 구분하지 않습니다.
+- `InstanceCount`는 배포된 Prewarmed instance를 포함할 수 있지만, 개별 instance의 active/Prewarmed 상태를 구분하지 않습니다.
 - 이 시험은 사용자 요청의 latency·오류율이나 Azure 내부 allocation 이벤트를 수집하지 않습니다.
 
 따라서 결과는 공식 warmed-buffer 메커니즘과 **일관된 방향의 외부 관찰 증거**이지만, Prewarmed가 차이를 만들었다는 인과관계를 증명하지는 않습니다.
@@ -776,9 +749,9 @@ az monitor metrics list \
   --resource "$APP_ID" \
   --metric InstanceCount \
   --interval PT1M \
-  --aggregation Maximum \
+  --aggregation Average \
   --start-time "$START" \
-  --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,instances:maximum}" \
+  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,instances:average}" \
   -o table
 ```
 
@@ -792,9 +765,9 @@ for attempt in $(seq 1 5); do
     --resource "$APP_ID" \
     --metric InstanceCount \
     --interval PT1M \
-    --aggregation Maximum \
+    --aggregation Average \
     --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-    --query "value[0].timeseries[0].data[?maximum != null].{time:timeStamp,count:maximum}" \
+    --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
     -o table
   sleep 60
 done

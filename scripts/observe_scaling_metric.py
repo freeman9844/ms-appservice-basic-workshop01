@@ -10,8 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
-METRIC_NAME = "AutomaticScalingInstanceCount"
-AGGREGATION = "Maximum"
+METRIC_NAME = "InstanceCount"
+AGGREGATION = "Average"
 INTERVAL = "PT1M"
 
 
@@ -53,12 +53,12 @@ def parse_metric_samples(payload, observed_at, earliest):
         if not isinstance(row, dict):
             continue
         timestamp = row.get("timeStamp", row.get("timestamp"))
-        maximum = row.get("maximum")
+        average = row.get("average")
         if not isinstance(timestamp, str):
             continue
-        if isinstance(maximum, bool) or not isinstance(maximum, (int, float)):
+        if isinstance(average, bool) or not isinstance(average, (int, float)):
             continue
-        if maximum < 0 or not float(maximum).is_integer():
+        if average < 0:
             continue
         try:
             metric_time = _utc(timestamp)
@@ -70,7 +70,9 @@ def parse_metric_samples(payload, observed_at, earliest):
             {
                 "metric_timestamp": _format_utc(metric_time),
                 "observed_at": _format_utc(observed_at),
-                "instance_count": int(maximum),
+                "instance_count": (
+                    int(average) if float(average).is_integer() else float(average)
+                ),
             }
         )
     return sorted(samples, key=lambda sample: sample["metric_timestamp"])

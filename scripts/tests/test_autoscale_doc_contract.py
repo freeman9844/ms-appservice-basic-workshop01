@@ -163,14 +163,6 @@ def test_steps_three_and_four_use_direct_commands():
             "  --settings STARTUP_DELAY_SECONDS=20 --output none"
         ),
         "health polling": "for attempt in $(seq 1 18); do",
-        "plan read-back": (
-            '--query "properties.{automaticScaling:elasticScaleEnabled,'
-            'maximumBurst:maximumElasticWorkerCount}"'
-        ),
-        "web app read-back": (
-            '--query "properties.{alwaysReady:minimumElasticInstanceCount,'
-            'prewarmed:preWarmedInstanceCount}"'
-        ),
         "trial A output": (
             'NO_PREWARM_OBSERVATIONS="$AB_DIR/'
             'prewarmed-0-observations.json"'
@@ -182,6 +174,9 @@ def test_steps_three_and_four_use_direct_commands():
     }
     for label, snippet in preparation_snippets.items():
         assert snippet in step_three, label
+    assert "🟢 **실행 — Automatic scaling 설정 재확인**" not in step_three
+    assert "automaticScaling:elasticScaleEnabled" not in step_three
+    assert "alwaysReady:minimumElasticInstanceCount" not in step_three
 
     trial_a_snippets = {
         "Prewarmed zero PATCH": (
@@ -312,11 +307,6 @@ def test_steps_three_through_six_explain_each_execution_block():
             step_three,
             "🟢 **실행 — 앱 준비 상태 확인**",
             ["최대 18회", "status", "ok"],
-        ),
-        (
-            step_three,
-            "🟢 **실행 — Automatic scaling 설정 재확인**",
-            ["Maximum burst", "Always-ready", "Prewarmed"],
         ),
         (
             step_four,
@@ -465,7 +455,7 @@ def test_step_six_explains_the_observed_prewarmed_benefit():
         "tail framing": "긴 지연 꼬리",
         "unequal samples": "4개 대 2개",
         "client observation": "`first_seen_at`은 클라이언트",
-        "no internal label": "active/Prewarmed 상태",
+        "no internal label": "개별 instance의 active/Prewarmed 상태",
         "no causality": "인과관계를 증명하지는 않습니다",
         "alternate result": "이번 실행에서는 이점이 관찰되지 않은 것",
     }
@@ -560,7 +550,7 @@ def test_health_polling_blocks_fail_after_final_attempt_without_sleeping():
         assert_health_polling_contract(command_block, failure_message), label
 
 
-def test_trials_record_automatic_scaling_instance_count():
+def test_trials_record_supported_instance_count_metric():
     text = DOC.read_text(encoding="utf-8")
     step_three = section(
         text,
@@ -615,6 +605,12 @@ def test_trials_record_automatic_scaling_instance_count():
         assert "METRIC_STATUS=$?" in command, label
         assert "metric exit=$METRIC_STATUS" in command, label
 
+    combined_steps = step_four + step_five
+    assert combined_steps.count("--aggregation Average") == 2
+    assert combined_steps.count("{time:timeStamp,count:average}") == 2
+    assert "--aggregation Maximum" not in combined_steps
+    assert "{time:timeStamp,count:maximum}" not in combined_steps
+
 
 def test_step_six_prints_and_limits_metric_timeline():
     text = DOC.read_text(encoding="utf-8")
@@ -624,14 +620,17 @@ def test_step_six_prints_and_limits_metric_timeline():
         "## 검증",
     )
 
-    assert "🟢 **실행 — AutomaticScalingInstanceCount 타임라인 출력**" in step_six
+    assert "🟢 **실행 — InstanceCount 타임라인 출력**" in step_six
     assert "trial_started_at" in step_six
     assert "metric_timestamp" in step_six
     assert "observed_at" in step_six
     assert "instance_count" in step_six
     assert "`PT1M`" in step_six
-    assert "active와 Prewarmed를 구분하지" in step_six
-    assert "instance ID" in step_six
+    assert "Automatic Scaling Instance Count" in step_six
+    assert "REST API 이름은 `InstanceCount`" in step_six
+    assert "배포된 Prewarmed instance를 포함할 수" in step_six
+    assert "개별 instance의 active/Prewarmed 상태" in step_six
     assert "정확한 activation 시각" in step_six
     assert "capacity 효율" in step_six
     assert "보조 증거" in step_six
+    assert "AutomaticScalingInstanceCount" not in step_six

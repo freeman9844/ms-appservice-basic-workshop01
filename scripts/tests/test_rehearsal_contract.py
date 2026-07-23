@@ -117,10 +117,14 @@ def test_rehearsal_validates_metric_files_and_prints_timeline():
         in REHEARSAL
     )
     assert 'PREWARM_METRICS="$TMP_DIR/prewarmed-1-instance-count.json"' in REHEARSAL
-    assert '.metric == "AutomaticScalingInstanceCount"' in REHEARSAL
+    assert '.metric == "InstanceCount"' in REHEARSAL
     assert '(.samples | type == "array" and length > 0)' in REHEARSAL
     assert ".metric_timestamp" in REHEARSAL
     assert ".observed_at" in REHEARSAL
     assert ".instance_count" in REHEARSAL
     assert "trial_started_at" in REHEARSAL
     assert "fromdateiso8601" in REHEARSAL
+    assert "AutomaticScalingInstanceCount" not in REHEARSAL
+    assert "--aggregation Average" in REHEARSAL
+    assert ".average" in REHEARSAL
+    assert "--aggregation Maximum" not in REHEARSAL
