@@ -52,3 +52,27 @@ def test_step_three_uses_log_analytics_results_image():
 
     assert image_reference in OBSERVABILITY
     assert (ROOT / "docs/images/08-log-analytics-kql-results.png").is_file()
+
+
+def test_app_insights_requests_use_workspace_query_in_cloud_shell():
+    observability_main = main_content(OBSERVABILITY)
+
+    assert "az monitor app-insights query -g" not in observability_main
+    assert observability_main.count("AppRequests") >= 2
+    assert observability_main.count(
+        "az monitor log-analytics query -w $LAW_CID"
+    ) >= 4
+    assert observability_main.count(
+        "APPI_ID=$(az monitor app-insights component show"
+    ) >= 2
+    assert "_ResourceId =~ '$APPI_ID'" in observability_main
+    assert "summarize count=sum(ItemCount) by name=Name" in observability_main
+
+
+def test_cloud_shell_msi_error_explains_workspace_query_path():
+    observability_troubleshooting = troubleshooting_content(OBSERVABILITY)
+
+    assert "api.applicationinsights.io" in observability_troubleshooting
+    assert "지원하지 않는 MSI token audience" in observability_troubleshooting
+    assert "```bash\naz logout" not in observability_troubleshooting
+    assert "AppRequests" in observability_troubleshooting

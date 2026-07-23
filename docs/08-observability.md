@@ -11,7 +11,7 @@
 - App Service 진단 설정을 구성하여 HTTP 로그·콘솔 로그·플랫폼 로그를 LAW로 전송합니다.
 - 인위적인 HTTP 트래픽을 발생시키고 KQL로 액세스 패턴을 분석합니다.
 - `APPLICATIONINSIGHTS_CONNECTION_STRING` 앱 설정을 주입하여 Flask 앱의 OpenTelemetry SDK를 활성화합니다.
-- `requests` 테이블 KQL로 애플리케이션 텔레메트리를 확인합니다.
+- workspace 기반 `AppRequests` 테이블 KQL로 애플리케이션 텔레메트리를 확인합니다.
 - 진단 설정(플랫폼 로그)과 App Insights(앱 텔레메트리)의 역할 차이를 이해합니다.
 - 모듈 종료 상태: **진단 설정 활성, APPLICATIONINSIGHTS_CONNECTION_STRING 주입 완료**.
 
@@ -146,19 +146,24 @@ az webapp config appsettings set -g $RG -n $APP \
 for i in $(seq 1 20); do curl -s $APP_URL/api/info > /dev/null; done
 ```
 
-🟢 **실행** — 수 분 뒤 App Insights `requests` 테이블을 조회합니다.
+🟢 **실행** — 수 분 뒤 같은 LAW의 workspace 기반 App Insights 테이블인 `AppRequests`를 조회합니다. Cloud Shell에서는 `api.applicationinsights.io` audience가 지원되지 않을 수 있으므로 `az monitor app-insights query` 대신 3단계와 같은 `az monitor log-analytics query`를 사용합니다.
 
 ```bash
-az monitor app-insights query -g $RG --apps $APPI --analytics-query \
-  'requests | where timestamp > ago(15m) | summarize count() by name' -o table
+LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
+APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
+az monitor log-analytics query -w $LAW_CID --analytics-query \
+  "AppRequests
+   | where TimeGenerated > ago(15m)
+   | where _ResourceId =~ '$APPI_ID'
+   | summarize count=sum(ItemCount) by name=Name" -o table
 ```
 
 📋 **예상 출력** (예시)
 
 ```
-name                count_
-------------------  -------
-GET /api/info       20
+name                count    TableName
+------------------  -------  -------------
+GET /api/info       20       PrimaryResult
 ```
 
 🖼️ **예상 화면** — Azure Portal → Application Insights(`appi-appsvcworkshop-$SUFFIX`) → **Live Metrics** 블레이드에서 실시간 요청률·응답 시간·실패율을 확인합니다. 트래픽을 전송하는 동안 차트가 실시간으로 갱신됩니다.
@@ -192,19 +197,24 @@ CsUriStem      ScStatus    TableName      Hits
 🟢 **실행** (트래픽 발생 후 수 분 대기)
 
 ```bash
-az monitor app-insights query -g $RG --apps $APPI --analytics-query \
-  'requests | where timestamp > ago(15m) | summarize count() by name' -o table
+LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
+APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
+az monitor log-analytics query -w $LAW_CID --analytics-query \
+  "AppRequests
+   | where TimeGenerated > ago(15m)
+   | where _ResourceId =~ '$APPI_ID'
+   | summarize count=sum(ItemCount) by name=Name" -o table
 ```
 
 📋 **예상 출력**
 
 ```
-name                count_
-------------------  -------
-GET /api/info       20
+name                count    TableName
+------------------  -------  -------------
+GET /api/info       20       PrimaryResult
 ```
 
-`AppServiceHTTPLogs`에 데이터가 조회되고 `requests` 테이블에 `/api/info` 항목이 확인되면 08 모듈이 완료된 것입니다.
+`AppServiceHTTPLogs`에 데이터가 조회되고 `AppRequests` 테이블에 `/api/info` 항목이 확인되면 08 모듈이 완료된 것입니다.
 
 ---
 
@@ -219,7 +229,7 @@ az monitor log-analytics query -w $LAW_CID --analytics-query \
   'AppServiceHTTPLogs | where TimeGenerated > ago(1h) | take 10' -o table
 ```
 
-### (2) `requests` 테이블이 0건
+### (2) `AppRequests` 테이블이 0건
 
 다음 순서로 확인합니다.
 
@@ -237,9 +247,23 @@ az extension add --name log-analytics --upgrade --only-show-errors
 
 설치 후 3단계 명령을 재실행합니다.
 
-### (4) `az monitor app-insights query` 명령 없음
+### (4) Cloud Shell credential problem 또는 MSI token audience 오류
 
-`application-insights` 확장이 설치되지 않았거나 손상된 경우입니다. 아래 명령으로 재설치합니다.
+`az monitor app-insights query`는 `https://api.applicationinsights.io` 토큰을 요청하지만 Cloud Shell에서는 **지원하지 않는 MSI token audience**일 수 있습니다. 오류 메시지의 `az logout`과 대화형 `az login`을 실행하지 말고, 4단계의 LAW 기반 `AppRequests` 쿼리를 사용합니다.
+
+```bash
+LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
+APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
+az monitor log-analytics query -w $LAW_CID --analytics-query \
+  "AppRequests
+   | where TimeGenerated > ago(1h)
+   | where _ResourceId =~ '$APPI_ID'
+   | summarize count=sum(ItemCount) by name=Name" -o table
+```
+
+### (5) `az monitor app-insights component show` 명령 없음
+
+`application-insights` 확장이 설치되지 않았거나 손상된 경우입니다. 아래 명령으로 재설치한 뒤 4단계를 다시 실행합니다.
 
 ```bash
 az extension add --name application-insights --upgrade --only-show-errors
