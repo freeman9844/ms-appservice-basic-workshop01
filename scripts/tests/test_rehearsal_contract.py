@@ -52,7 +52,7 @@ def test_baseline_id_acquisition_is_distinct_from_observer_failure():
     assert 'message="baseline ID acquisition failed."' not in DOCS
 
 
-def test_docs_use_direct_restoration_instead_of_cleanup_helpers():
+def test_docs_omit_removed_restoration_and_cleanup_helpers():
     assert "trap cleanup_demo EXIT" not in DOCS
     assert "trap 'cleanup_demo 130' INT" not in DOCS
     assert "trap 'cleanup_demo 143' TERM" not in DOCS
@@ -61,10 +61,10 @@ def test_docs_use_direct_restoration_instead_of_cleanup_helpers():
     assert "handle_trial_observation" not in DOCS
     assert "관찰 도구가 오류로 종료했습니다." not in DOCS
     assert "새 instance를 관찰하지 못했습니다." not in DOCS
-    assert 'az webapp config appsettings delete -g "$RG" -n "$APP"' in DOCS
-    assert 'echo "Always-ready=1, Prewarmed=1 복원 및 STARTUP_DELAY_SECONDS 삭제 완료"' in DOCS
+    assert 'az webapp config appsettings delete -g "$RG" -n "$APP"' not in DOCS
+    assert 'echo "Always-ready=1, Prewarmed=1 복원 및 STARTUP_DELAY_SECONDS 삭제 완료"' not in DOCS
     assert "for attempt in $(seq 1 18); do" in DOCS
-    assert "/health 확인 실패: 다음 모듈로 진행하지 마세요." in DOCS
+    assert "/health 확인 실패: 다음 모듈로 진행하지 마세요." not in DOCS
     assert 'wait "$HEY_PID" || true' not in DOCS
     assert "플랫폼 내부 라우팅이 실제로 시작된 정확한 시각은 아닙니다" in DOCS
 

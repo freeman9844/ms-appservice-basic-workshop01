@@ -216,7 +216,7 @@ def test_steps_five_and_six_use_direct_commands():
     step_six = section(
         text,
         "## 6단계 — 결과 해석 및 정리",
-        "## 검증",
+        "## 트러블슈팅",
     )
 
     assert FUNCTION_DEFINITION.search(step_five) is None
@@ -247,33 +247,6 @@ def test_steps_five_and_six_use_direct_commands():
     assert "prime_url" not in step_five
     assert "wait_for_prewarmed" not in step_five
 
-    restoration_snippets = {
-        "Trial A result": '"$NO_PREWARM_OBSERVATIONS"',
-        "Trial B result": '"$PREWARM_OBSERVATIONS"',
-        "default PATCH": (
-            '\'{"properties":{"minimumElasticInstanceCount":1,'
-            '"preWarmedInstanceCount":1}}\''
-        ),
-        "startup delay deletion": (
-            "az webapp config appsettings delete"
-        ),
-        "health polling": "for attempt in $(seq 1 18); do",
-        "plan read-back": (
-            '--query "properties.{automaticScaling:elasticScaleEnabled,'
-            'maximumBurst:maximumElasticWorkerCount}"'
-        ),
-        "web read-back": (
-            '--query "properties.{alwaysReady:minimumElasticInstanceCount,'
-            'prewarmed:preWarmedInstanceCount}"'
-        ),
-        "startup delay read-back": (
-            '--query "[?name==\'STARTUP_DELAY_SECONDS\'] | length(@)"'
-        ),
-    }
-    for label, snippet in restoration_snippets.items():
-        assert snippet in step_six, label
-
-
 def test_steps_three_through_six_explain_each_execution_block():
     text = DOC.read_text(encoding="utf-8")
     step_three = section(
@@ -294,7 +267,7 @@ def test_steps_three_through_six_explain_each_execution_block():
     step_six = section(
         text,
         "## 6단계 — 결과 해석 및 정리",
-        "## 검증",
+        "## 트러블슈팅",
     )
 
     contracts = [
@@ -342,21 +315,6 @@ def test_steps_three_through_six_explain_each_execution_block():
             step_six,
             "🟢 **실행 — 결과 표 출력**",
             ["두 JSON", "TSV", "승자"],
-        ),
-        (
-            step_six,
-            "🟢 **실행 — 모듈 기본 상태로 복원**",
-            ["Always-ready=1", "Prewarmed=1", "STARTUP_DELAY_SECONDS"],
-        ),
-        (
-            step_six,
-            "🟢 **실행 — 복원 후 앱 준비 확인**",
-            ["최대 18회", "status", "ok"],
-        ),
-        (
-            step_six,
-            "🟢 **실행 — 복원 상태 조회**",
-            ["Plan", "Web App", "STARTUP_DELAY_SECONDS"],
         ),
     ]
 
@@ -487,7 +445,7 @@ def test_step_six_explains_the_observed_prewarmed_benefit():
     step_six = section(
         text,
         "## 6단계 — 결과 해석 및 정리",
-        "🟢 **실행 — 모듈 기본 상태로 복원**",
+        "## 트러블슈팅",
     )
 
     required_snippets = {
@@ -509,15 +467,12 @@ def test_step_six_explains_the_observed_prewarmed_benefit():
         "Trial A range": "범위 20초",
         "Trial B evidence": "25–39초",
         "Trial B range": "범위 14초",
-        "equal samples": "각 4개",
+        "equal samples": "Trial B(Prewarmed=1)는 4개 instance",
         "maximum difference": "최댓값은 9초",
         "range difference": "범위는 6초",
         "descriptive statistics": "기술 통계",
-        "no generalization": "일반화할 수 없습니다",
-        "client observation": "`first_seen_at`은 클라이언트",
         "no internal label": "개별 instance의 active/Prewarmed 상태",
-        "no causality": "인과관계를 증명하지는 않습니다",
-        "alternate result": "이번 실행에서는 이점이 관찰되지 않은 것",
+        "no causality": "인과관계 증명은 아닙니다",
     }
 
     for label, snippet in required_snippets.items():
@@ -548,6 +503,27 @@ def test_step_six_explains_the_observed_prewarmed_benefit():
     assert expected_observations in step_six
     assert "4개 대 2개" not in step_six
     assert "모두 23초" not in step_six
+
+
+def test_step_six_ends_after_observed_benefit_and_has_no_validation_section():
+    text = DOC.read_text(encoding="utf-8")
+    step_six = section(
+        text,
+        "## 6단계 — 결과 해석 및 정리",
+        "## 트러블슈팅",
+    )
+
+    assert "### 이번 실측에서 보인 이점" in step_six
+    for removed in [
+        "### 이 결과가 증명하지 않는 것",
+        "### 다른 결과가 나오면",
+        "🟢 **실행 — 모듈 기본 상태로 복원**",
+        "🟢 **실행 — 복원 후 앱 준비 확인**",
+        "🟢 **실행 — 복원 상태 조회**",
+        "## 검증",
+        "### A/B 관찰 파일 확인",
+    ]:
+        assert removed not in text
 
 
 def test_trial_observation_runs_only_after_baseline_capture_succeeds():
@@ -604,22 +580,12 @@ def test_health_polling_blocks_fail_after_final_attempt_without_sleeping():
         "## 3단계 — Prewarmed A/B 비교 준비",
         "## 4단계 — 시험 A",
     )
-    step_six = section(
-        text,
-        "## 6단계 — 결과 해석 및 정리",
-        "## 검증",
-    )
 
     health_contracts = [
         (
             "step 3 health check",
             code_block_after(step_three, "🟢 **실행 — 앱 준비 상태 확인**"),
             'echo "/health 확인 실패: 6단계의 복원 명령을 실행하세요." >&2',
-        ),
-        (
-            "step 6 health check",
-            code_block_after(step_six, "🟢 **실행 — 복원 후 앱 준비 확인**"),
-            'echo "/health 확인 실패: 다음 모듈로 진행하지 마세요." >&2',
         ),
     ]
 
@@ -694,7 +660,7 @@ def test_step_six_prints_and_limits_metric_timeline():
     step_six = section(
         text,
         "## 6단계 — 결과 해석 및 정리",
-        "## 검증",
+        "## 트러블슈팅",
     )
 
     assert "🟢 **실행 — InstanceCount 타임라인 출력**" in step_six
