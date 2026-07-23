@@ -323,6 +323,116 @@ def test_observe_cancels_blocked_futures_without_waiting(monkeypatch):
     assert executor.shutdown_args == (False, True)
 
 
+class _RecordingConnection:
+    def __init__(self):
+        self.messages = []
+        self.closed = False
+
+    def send(self, value):
+        self.messages.append(value)
+
+    def close(self):
+        self.closed = True
+
+
+def test_observe_child_signals_started_before_running_duration(monkeypatch):
+    connection = _RecordingConnection()
+    monkeypatch.setattr(oi, "_observe_threaded", lambda *args: ["sample"])
+
+    oi._observe_child(connection, "url", "baseline", 180, 30, 5)
+
+    assert connection.messages == [
+        ("started", None),
+        ("ok", ["sample"]),
+    ]
+    assert connection.closed is True
+
+
+class _HandshakeParentConnection:
+    def __init__(self):
+        self.messages = iter([("started", None), ("ok", ["sample"])])
+        self.poll_timeouts = []
+
+    def poll(self, timeout=0):
+        self.poll_timeouts.append(timeout)
+        return True
+
+    def recv(self):
+        return next(self.messages)
+
+    def close(self):
+        pass
+
+
+class _HandshakeChildConnection:
+    def close(self):
+        pass
+
+
+class _CompletedProcess:
+    exitcode = 0
+
+    def __init__(self):
+        self.join_timeouts = []
+
+    def start(self):
+        pass
+
+    def join(self, timeout=None):
+        self.join_timeouts.append(timeout)
+
+    def is_alive(self):
+        return False
+
+    def close(self):
+        pass
+
+
+class _HandshakeContext:
+    def __init__(self, parent, child, process):
+        self.parent = parent
+        self.child = child
+        self.process = process
+
+    def Pipe(self, duplex=False):
+        return self.parent, self.child
+
+    def Process(self, **kwargs):
+        return self.process
+
+
+def test_observe_starts_hard_deadline_after_child_ready(monkeypatch):
+    parent = _HandshakeParentConnection()
+    child = _HandshakeChildConnection()
+    process = _CompletedProcess()
+    context = _HandshakeContext(parent, child, process)
+    monkeypatch.setattr(oi, "_multiprocessing_context", lambda: context)
+
+    assert oi.observe("url", "baseline", 180, 30, 5) == ["sample"]
+    assert parent.poll_timeouts[0] == oi.PROCESS_START_GRACE
+    assert process.join_timeouts[0] == 180 + oi.HARD_DEADLINE_GRACE
+
+
+class _EofParentConnection(_HandshakeParentConnection):
+    def recv(self):
+        raise EOFError
+
+
+def test_observe_reports_child_exit_before_startup_handshake(monkeypatch):
+    parent = _EofParentConnection()
+    child = _HandshakeChildConnection()
+    process = _CompletedProcess()
+    process.exitcode = 1
+    context = _HandshakeContext(parent, child, process)
+    monkeypatch.setattr(oi, "_multiprocessing_context", lambda: context)
+
+    with pytest.raises(
+        oi.ObservationExecutionError,
+        match=r"exited before startup handshake \(exit=1\)",
+    ):
+        oi.observe("url", "baseline", 180, 30, 5)
+
+
 class _BlockedLoopbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)

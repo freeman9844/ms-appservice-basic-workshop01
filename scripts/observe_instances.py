@@ -14,6 +14,7 @@ from urllib.request import urlopen
 
 HARD_DEADLINE_GRACE = 0.25
 PROCESS_REAP_GRACE = 0.2
+PROCESS_START_GRACE = 5
 
 
 def _utc(value):
@@ -129,6 +130,7 @@ class ObservationExecutionError(RuntimeError):
 
 def _observe_child(connection, url, baseline_instance, duration, concurrency, request_timeout):
     try:
+        connection.send(("started", None))
         connection.send(
             (
                 "ok",
@@ -180,7 +182,6 @@ def observe(url, baseline_instance, duration, concurrency, request_timeout):
         ),
         daemon=True,
     )
-    hard_deadline = time.monotonic() + duration + HARD_DEADLINE_GRACE
     started = False
     try:
         try:
@@ -189,8 +190,30 @@ def observe(url, baseline_instance, duration, concurrency, request_timeout):
             raise ObservationExecutionError(f"failed to start observation child: {error}") from error
         started = True
         child_connection.close()
-        remaining = max(0, hard_deadline - time.monotonic())
-        process.join(remaining)
+        if not parent_connection.poll(PROCESS_START_GRACE):
+            if process.is_alive():
+                _terminate_and_reap(process)
+            raise ObservationExecutionError(
+                f"observation child did not start within {PROCESS_START_GRACE} seconds"
+            )
+        try:
+            status, payload = parent_connection.recv()
+        except (EOFError, OSError) as error:
+            if process.is_alive():
+                _terminate_and_reap(process)
+            else:
+                process.join()
+            raise ObservationExecutionError(
+                f"observation child exited before startup handshake (exit={process.exitcode})"
+            ) from error
+        if status != "started":
+            if status == "error":
+                raise ObservationExecutionError(payload)
+            raise ObservationExecutionError(
+                f"observation child returned unexpected startup status: {status}"
+            )
+
+        process.join(duration + HARD_DEADLINE_GRACE)
         if process.is_alive():
             _terminate_and_reap(process)
             raise ObservationExecutionError("observation exceeded its hard deadline")
@@ -198,7 +221,12 @@ def observe(url, baseline_instance, duration, concurrency, request_timeout):
             raise ObservationExecutionError(
                 f"observation child exited without a result (exit={process.exitcode})"
             )
-        status, payload = parent_connection.recv()
+        try:
+            status, payload = parent_connection.recv()
+        except (EOFError, OSError) as error:
+            raise ObservationExecutionError(
+                f"observation child exited without a readable result (exit={process.exitcode})"
+            ) from error
         if status == "error":
             raise ObservationExecutionError(payload)
         return payload
