@@ -16,6 +16,19 @@ def test_rehearsal_verifies_plan_and_trial_configuration():
     assert REHEARSAL.count("api-version=2024-11-01") >= 5
 
 
+def test_rehearsal_enables_app_service_managed_application_insights():
+    observability = REHEARSAL.split(
+        'echo "===== [08] 진단 설정 + KQL + App Insights', 1
+    )[1].split(
+        'if [ "${SKIP_OPTIONAL:-0}" != "1" ]; then', 1
+    )[0]
+
+    assert 'APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN"' in observability
+    assert "ApplicationInsightsAgent_EXTENSION_VERSION=~3" in observability
+    assert "AI_SETTINGS_OK=" in observability
+    assert "configure_azure_monitor" not in REHEARSAL
+
+
 def test_rehearsal_preserves_hey_failures_and_stops_tracked_pid():
     assert "stop_tracked_hey()" in REHEARSAL
     assert 'kill "$pid"' in REHEARSAL

@@ -647,7 +647,17 @@ az monitor diagnostic-settings create --name appsvc-diag --resource "$WEBAPP_ID"
 AI_CONN=$(az monitor app-insights component show -g "$RG" --app "$APPI" \
   --query connectionString -o tsv)
 az webapp config appsettings set -g "$RG" -n "$APP" \
-  --settings APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN" -o none
+  --settings \
+    APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN" \
+    ApplicationInsightsAgent_EXTENSION_VERSION=~3 -o none
+AI_SETTINGS_OK=$(az webapp config appsettings list -g "$RG" -n "$APP" \
+  --query "[?name=='APPLICATIONINSIGHTS_CONNECTION_STRING' && value!='' ||
+             name=='ApplicationInsightsAgent_EXTENSION_VERSION' && value=='~3'] |
+            length(@)" -o tsv)
+if [ "$AI_SETTINGS_OK" -ne 2 ]; then
+  echo "[08] Application Insights 관리형 에이전트 설정 확인 실패" >&2
+  exit 1
+fi
 sleep 40
 for i in $(seq 1 30); do curl -s "$APP_URL/api/info" > /dev/null; done
 echo "[08] 로그 적재 대기(최대 10분) 후 KQL 확인 — 리허설에서는 5분 후 1회 시도"
