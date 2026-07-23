@@ -93,13 +93,7 @@ for i in $(seq 1 30); do curl -s $APP_URL/api/info > /dev/null; done
 
 ## 3단계 — KQL로 HTTP 로그 조회
 
-🟢 **실행** — `az monitor log-analytics query` 명령은 `log-analytics` 확장이 필요합니다. 대화형 설치 프롬프트를 방지하기 위해 사전 설치합니다.
-
-```bash
-az extension add --name log-analytics --upgrade --only-show-errors
-```
-
-🟢 **실행** — LAW 워크스페이스 ID를 조회하고 KQL 쿼리를 실행합니다.
+🟢 **실행** — 01 모듈에서 설치한 `log-analytics` 확장을 사용해 LAW 워크스페이스 ID를 조회하고 KQL 쿼리를 실행합니다.
 
 ```bash
 LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
@@ -134,10 +128,9 @@ AppServiceHTTPLogs
 
 ## 4단계 — App Insights 커넥션 스트링 주입
 
-🟢 **실행** — `application-insights` 확장을 설치하고 커넥션 스트링을 앱 설정으로 주입합니다.
+🟢 **실행** — 01 모듈에서 설치한 `application-insights` 확장을 사용해 커넥션 스트링을 앱 설정으로 주입합니다.
 
 ```bash
-az extension add --name application-insights --upgrade --only-show-errors
 AI_CONN=$(az monitor app-insights component show -g $RG --app $APPI --query connectionString -o tsv)
 az webapp config appsettings set -g $RG -n $APP \
   --settings APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN"
@@ -244,7 +237,7 @@ az extension add --name log-analytics --upgrade --only-show-errors
 
 ### (4) `az monitor app-insights query` 명령 없음
 
-4단계 첫 번째 명령(`az extension add --name application-insights`)이 실행되지 않은 경우입니다. 아래 명령으로 재설치합니다.
+`application-insights` 확장이 설치되지 않았거나 손상된 경우입니다. 아래 명령으로 재설치합니다.
 
 ```bash
 az extension add --name application-insights --upgrade --only-show-errors
