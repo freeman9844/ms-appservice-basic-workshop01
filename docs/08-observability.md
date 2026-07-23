@@ -215,6 +215,8 @@ GET /api/info       20       PrimaryResult
 
 🖼️ **예상 화면** — Azure Portal → Application Insights(`appi-appsvcworkshop-$SUFFIX`) → **Live Metrics** 블레이드에서 실시간 요청률·응답 시간·실패율을 확인합니다. 트래픽을 전송하는 동안 차트가 실시간으로 갱신됩니다.
 
+![Application Insights Live Metrics에서 요청 텔레메트리 확인](images/08-application-insights-live-metrics.png)
+
 ---
 
 ## 검증

@@ -54,6 +54,18 @@ def test_step_three_uses_log_analytics_results_image():
     assert (ROOT / "docs/images/08-log-analytics-kql-results.png").is_file()
 
 
+def test_step_four_uses_application_insights_live_metrics_image():
+    image_reference = (
+        "![Application Insights Live Metrics에서 요청 텔레메트리 확인]"
+        "(images/08-application-insights-live-metrics.png)"
+    )
+
+    assert image_reference in OBSERVABILITY
+    assert (
+        ROOT / "docs/images/08-application-insights-live-metrics.png"
+    ).is_file()
+
+
 def test_app_insights_requests_use_workspace_query_in_cloud_shell():
     observability_main = main_content(OBSERVABILITY)
 
