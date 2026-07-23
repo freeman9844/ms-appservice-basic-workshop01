@@ -7,6 +7,8 @@ ENVIRONMENT_SETUP = (ROOT / "docs/02-environment-setup.md").read_text(
     encoding="utf-8"
 )
 OBSERVABILITY = (ROOT / "docs/08-observability.md").read_text(encoding="utf-8")
+APP_SOURCE = (ROOT / "app/app.py").read_text(encoding="utf-8")
+APP_REQUIREMENTS = (ROOT / "app/requirements.txt").read_text(encoding="utf-8")
 
 
 def main_content(document):
@@ -15,6 +17,12 @@ def main_content(document):
 
 def troubleshooting_content(document):
     return document.split("## 트러블슈팅", 1)[1]
+
+
+def test_application_does_not_embed_application_insights_sdk():
+    assert "azure-monitor-opentelemetry" not in APP_REQUIREMENTS
+    assert "configure_azure_monitor" not in APP_SOURCE
+    assert "APPLICATIONINSIGHTS_CONNECTION_STRING" not in APP_SOURCE
 
 
 def test_normal_extension_installation_is_centralized_in_prerequisites():

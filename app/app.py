@@ -1,7 +1,6 @@
 """App Service 워크숍 데모 앱 (Flask).
 
 - VERSION 상수는 슬롯/카나리 실습에서 sed로 치환된다 (v1 → v2).
-- APPLICATIONINSIGHTS_CONNECTION_STRING 앱 설정이 있을 때만 OTel 계측 활성.
 """
 import os
 import socket
@@ -11,11 +10,6 @@ from datetime import datetime, timezone
 
 # 프로세스 시작 시각 — 앱 설정 변경 재시작(04)·Auto-heal 재활용(11) 관찰용
 STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
-    from azure.monitor.opentelemetry import configure_azure_monitor
-
-    configure_azure_monitor()
 
 from flask import Flask, request, jsonify
 
