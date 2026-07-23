@@ -160,13 +160,26 @@ if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
 fi
 ```
 
-🟢 **실행** — 정상 응답을 확인하면서 트래픽을 추가 생성합니다.
+🟢 **실행** — 정상·느린·실패 요청을 구분하여 생성합니다.
 
 ```bash
 for i in $(seq 1 20); do
   curl -fsS "$APP_URL/api/info" > /dev/null
 done
+for i in $(seq 1 5); do
+  curl -fsS "$APP_URL/slow?sec=3" > /dev/null
+done
+for i in $(seq 1 5); do
+  STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+    "$APP_URL/workshop-not-found")
+  if [ "$STATUS" != "404" ]; then
+    echo "예상하지 못한 상태 코드: $STATUS" >&2
+    false
+  fi
+done
 ```
+
+> 👁️ `/api/info`는 정상 기준, `/slow?sec=3`은 성능 병목, `/workshop-not-found`는 의도한 404 실패를 만듭니다. App Service Metrics의 전체 요청 수·평균 응답 시간과 달리 Application Insights에서는 이 요청들을 operation별로 구분해 조사할 수 있습니다.
 
 🟢 **실행** — 같은 LAW의 workspace 기반 App Insights 테이블인 `AppRequests`를 최대 5분간 확인합니다. Cloud Shell에서는 `api.applicationinsights.io` audience가 지원되지 않을 수 있으므로 `az monitor app-insights query` 대신 3단계와 같은 `az monitor log-analytics query`를 사용합니다.
 
@@ -201,21 +214,35 @@ az monitor log-analytics query -w $LAW_CID --analytics-query \
   "AppRequests
    | where TimeGenerated > ago(30m)
    | where _ResourceId =~ '$APPI_ID'
-   | where Name == 'GET /api/info'
-   | summarize count=sum(ItemCount) by name=Name" -o table
+   | where Name in ('GET /api/info', 'GET /slow', 'GET /workshop-not-found')
+   | summarize
+       requests=sum(ItemCount),
+       avg_ms=round(avg(DurationMs), 1),
+       p95_ms=round(percentile(DurationMs, 95), 1)
+     by Name, ResultCode, Success
+   | order by avg_ms desc" -o table
 ```
 
 📋 **예상 출력** (예시)
 
 ```
-name                count    TableName
-------------------  -------  -------------
-GET /api/info       20       PrimaryResult
+Name                    ResultCode    Success    Requests    Avg_ms    P95_ms
+----------------------  ------------  ---------  ----------  --------  --------
+GET /slow               200           true       5           3002.1    3003.4
+GET /api/info            200           true       20          3.2       5.1
+GET /workshop-not-found  404           false      5           2.8       4.0
 ```
 
 🖼️ **예상 화면** — Azure Portal → Application Insights(`appi-appsvcworkshop-$SUFFIX`) → **Live Metrics** 블레이드에서 실시간 요청률·응답 시간·실패율을 확인합니다. 트래픽을 전송하는 동안 차트가 실시간으로 갱신됩니다.
 
 ![Application Insights Live Metrics에서 요청 텔레메트리 확인](images/08-application-insights-live-metrics.png)
+
+### Application Insights에서 추가로 확인할 내용
+
+1. **Performance** — Application Insights 메뉴의 **Investigate > Performance**에서 `GET /slow`을 선택합니다. `GET /api/info`보다 약 3초 긴 duration 분포가 보이는지 확인하고, 하단의 sample을 선택합니다.
+2. **End-to-end transaction details** — 느린 sample을 열어 요청 하나의 시간선, duration, result code, operation ID와 속성을 확인합니다. 플랫폼 Metrics의 집계값과 달리 개별 요청을 추적할 수 있다는 점이 핵심입니다.
+3. **Failures** — **Investigate > Failures**에서 `GET /workshop-not-found`와 HTTP 404가 표시되는지 확인합니다. 의도한 실패이므로 워크숍 앱 장애가 아닙니다.
+4. **Application Map** — 외부 HTTP·데이터베이스 dependency를 호출하지 않는 현재 시나리오에서는 앱 **단일 노드**만 표시되고 dependency 연결이 없는 것이 정상입니다.
 
 ---
 

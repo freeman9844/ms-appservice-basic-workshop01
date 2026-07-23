@@ -104,3 +104,23 @@ def test_step_four_waits_for_restart_and_telemetry_ingestion():
     assert "APP_REQUEST_COUNT=" in step_four
     assert "sleep 30" in step_four
     assert "AppRequests 적재 확인 실패" in step_four
+
+
+def test_step_four_demonstrates_application_insights_diagnostics():
+    observability_main = main_content(OBSERVABILITY)
+    step_four = observability_main.split(
+        "## 4단계 — App Insights 커넥션 스트링 주입", 1
+    )[1]
+
+    assert 'curl -fsS "$APP_URL/api/info"' in step_four
+    assert 'curl -fsS "$APP_URL/slow?sec=3"' in step_four
+    assert '"$APP_URL/workshop-not-found"' in step_four
+    assert "ResultCode" in step_four
+    assert "Success" in step_four
+    assert "avg(DurationMs)" in step_four
+    assert "percentile(DurationMs, 95)" in step_four
+    assert "**Performance**" in step_four
+    assert "**Failures**" in step_four
+    assert "End-to-end transaction details" in step_four
+    assert "Application Map" in step_four
+    assert "단일 노드" in step_four
