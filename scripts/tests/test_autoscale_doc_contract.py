@@ -426,6 +426,62 @@ def test_trial_observation_explanations_describe_command_flow():
             assert term in explanation, (label, term)
 
 
+def test_trial_a_expected_output_uses_successful_metric_rehearsal():
+    text = DOC.read_text(encoding="utf-8")
+    step_four = section(
+        text,
+        "## 4단계 — 시험 A",
+        "## 5단계 — scale-in 게이트 후 시험 B",
+    )
+
+    required_lines = [
+        "📋 **예상 출력** (2026-07-23 리허설 예시)",
+        "metric_timestamp\tobserved_at\tinstance_count",
+        "instance\tstarted_at\tfirst_seen_at\tfirst_response_age",
+        "2026-07-23T03:20:00Z\t2026-07-23T03:21:35Z\t1",
+        "a2b002c6\t2026-07-23T03:22:05Z\t2026-07-23T03:22:33Z\t28",
+        "5bef3ff3\t2026-07-23T03:22:22Z\t2026-07-23T03:23:03Z\t41",
+        "bd29045b\t2026-07-23T03:22:24Z\t2026-07-23T03:23:04Z\t40",
+        "3122a953\t2026-07-23T03:22:16Z\t2026-07-23T03:23:04Z\t48",
+        "2026-07-23T03:24:00Z\t2026-07-23T03:24:45Z\t5",
+        "observer exit=0, hey exit=0, metric exit=0",
+    ]
+
+    for line in required_lines:
+        assert line in step_four
+
+    assert "metric과 instance 행의 출력 순서는 실행마다 달라질 수 있습니다" in step_four
+
+
+def test_trial_b_expected_output_uses_successful_metric_rehearsal():
+    text = DOC.read_text(encoding="utf-8")
+    step_five = section(
+        text,
+        "## 5단계 — scale-in 게이트 후 시험 B",
+        "## 6단계 — 결과 해석 및 정리",
+    )
+
+    required_lines = [
+        "📋 **예상 출력** (2026-07-23 리허설 예시)",
+        "metric_timestamp\tobserved_at\tinstance_count",
+        "instance\tstarted_at\tfirst_seen_at\tfirst_response_age",
+        "2026-07-23T03:28:00Z\t2026-07-23T03:29:25Z\t1",
+        "69e069d8\t2026-07-23T03:29:35Z\t2026-07-23T03:30:00Z\t25",
+        "9b19c4d6\t2026-07-23T03:29:36Z\t2026-07-23T03:30:01Z\t25",
+        "8e0e812d\t2026-07-23T03:30:13Z\t2026-07-23T03:30:52Z\t39",
+        "5d90b391\t2026-07-23T03:30:21Z\t2026-07-23T03:30:52Z\t31",
+        "2026-07-23T03:31:00Z\t2026-07-23T03:31:32Z\t3",
+        "2026-07-23T03:32:00Z\t2026-07-23T03:32:35Z\t5",
+        "observer exit=0, hey exit=0, metric exit=0",
+    ]
+
+    for line in required_lines:
+        assert line in step_five
+
+    assert "metric과 instance 행의 출력 순서는 실행마다 달라질 수 있습니다" in step_five
+    assert "`instance_count=3`은 1분 구간의 Average" in step_five
+
+
 def test_step_six_explains_the_observed_prewarmed_benefit():
     text = DOC.read_text(encoding="utf-8")
     step_six = section(
@@ -449,11 +505,15 @@ def test_step_six_explains_the_observed_prewarmed_benefit():
         ),
         "buffer mechanism": "warmed capacity buffer",
         "readiness floor": "약 20초의 readiness floor",
-        "Trial A evidence": "22–46초",
-        "Trial A range": "24초",
-        "Trial B evidence": "23초",
-        "tail framing": "긴 지연 꼬리",
-        "unequal samples": "4개 대 2개",
+        "Trial A evidence": "28–48초",
+        "Trial A range": "범위 20초",
+        "Trial B evidence": "25–39초",
+        "Trial B range": "범위 14초",
+        "equal samples": "각 4개",
+        "maximum difference": "최댓값은 9초",
+        "range difference": "범위는 6초",
+        "descriptive statistics": "기술 통계",
+        "no generalization": "일반화할 수 없습니다",
         "client observation": "`first_seen_at`은 클라이언트",
         "no internal label": "개별 instance의 active/Prewarmed 상태",
         "no causality": "인과관계를 증명하지는 않습니다",
@@ -466,11 +526,28 @@ def test_step_six_explains_the_observed_prewarmed_benefit():
     expected_summary = "\n".join(
         [
             "trial\tsamples\tmin_age\tmax_age\trange",
-            "Prewarmed=0\t4\t22\t46\t24",
-            "Prewarmed=1\t2\t23\t23\t0",
+            "Prewarmed=0\t4\t28\t48\t20",
+            "Prewarmed=1\t4\t25\t39\t14",
         ]
     )
     assert expected_summary in step_six
+
+    expected_observations = "\n".join(
+        [
+            "Prewarmed=0\ta2b002c6\t2026-07-23T03:22:05Z\t2026-07-23T03:22:33Z\t28",
+            "Prewarmed=0\t5bef3ff3\t2026-07-23T03:22:22Z\t2026-07-23T03:23:03Z\t41",
+            "Prewarmed=0\tbd29045b\t2026-07-23T03:22:24Z\t2026-07-23T03:23:04Z\t40",
+            "Prewarmed=0\t3122a953\t2026-07-23T03:22:16Z\t2026-07-23T03:23:04Z\t48",
+            "Prewarmed=1\t69e069d8\t2026-07-23T03:29:35Z\t2026-07-23T03:30:00Z\t25",
+            "Prewarmed=1\t9b19c4d6\t2026-07-23T03:29:36Z\t2026-07-23T03:30:01Z\t25",
+            "Prewarmed=1\t8e0e812d\t2026-07-23T03:30:13Z\t2026-07-23T03:30:52Z\t39",
+            "Prewarmed=1\t5d90b391\t2026-07-23T03:30:21Z\t2026-07-23T03:30:52Z\t31",
+        ]
+    )
+    assert "📋 **예상 출력** (2026-07-23 리허설 예시)" in step_six
+    assert expected_observations in step_six
+    assert "4개 대 2개" not in step_six
+    assert "모두 23초" not in step_six
 
 
 def test_trial_observation_runs_only_after_baseline_capture_succeeds():

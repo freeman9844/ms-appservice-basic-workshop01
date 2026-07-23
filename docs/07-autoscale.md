@@ -367,18 +367,26 @@ fi
 
 > ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 6단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 3단계부터 다시 시도합니다.
 
-📋 **예상 출력** (2026-07-21 리허설 예시)
+📋 **예상 출력** (2026-07-23 리허설 예시)
 
 ```text
-Prewarmed=0 기준 instance: 0299d35b
+metric_timestamp	observed_at	instance_count
 instance	started_at	first_seen_at	first_response_age
-a2b002c6	2026-07-21T06:37:27Z	2026-07-21T06:37:49Z	22
-e46cbdac	2026-07-21T06:37:04Z	2026-07-21T06:37:50Z	46
-d09f4aa4	2026-07-21T06:37:20Z	2026-07-21T06:37:50Z	30
-0669595a	2026-07-21T06:37:17Z	2026-07-21T06:37:50Z	33
+2026-07-23T03:20:00Z	2026-07-23T03:21:35Z	1
+2026-07-23T03:21:00Z	2026-07-23T03:21:35Z	1
+a2b002c6	2026-07-23T03:22:05Z	2026-07-23T03:22:33Z	28
+2026-07-23T03:22:00Z	2026-07-23T03:22:38Z	1
+5bef3ff3	2026-07-23T03:22:22Z	2026-07-23T03:23:03Z	41
+bd29045b	2026-07-23T03:22:24Z	2026-07-23T03:23:04Z	40
+3122a953	2026-07-23T03:22:16Z	2026-07-23T03:23:04Z	48
+[2]+  Done                    hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$AB_DIR/hey-burst-0.out"
+2026-07-23T03:24:00Z	2026-07-23T03:24:45Z	5
+2026-07-23T03:25:00Z	2026-07-23T03:25:34Z	5
+[1]+  Done                    python3 "$REPO_DIR/scripts/observe_scaling_metric.py" --resource "$APP_ID" --duration 240 --poll-interval 30 --output "$NO_PREWARM_METRICS"
+observer exit=0, hey exit=0, metric exit=0
 ```
 
-> 👁️ 표에는 기준 instance를 제외한 **새 instance만** 기록됩니다. 한 시험에서 여러 새 instance가 보이면 JSON 배열과 표에 모두 남습니다.
+> 👁️ 세 exit code가 모두 0이므로 유효한 시험 A 결과입니다. 기준 instance를 제외한 새 instance 4개가 기록됐고, `InstanceCount`는 이후 5까지 증가했습니다. metric과 instance 행의 출력 순서는 실행마다 달라질 수 있습니다. `PT1M` Average와 수집 지연 때문에 중간 metric timestamp가 생략되거나, 새 instance의 `first_seen_at`보다 count 증가가 늦게 출력돼도 오류가 아닙니다. `[1]`, `[2]` 작업 번호도 셸 실행마다 달라질 수 있습니다.
 
 ---
 
@@ -483,15 +491,25 @@ fi
 
 > ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 결과를 해석합니다.
 
-📋 **예상 출력** (2026-07-21 리허설 예시)
+📋 **예상 출력** (2026-07-23 리허설 예시)
 
 ```text
-Prewarmed=1 기준 instance: a2b002c6
+metric_timestamp	observed_at	instance_count
 instance	started_at	first_seen_at	first_response_age
-5bef3ff3	2026-07-21T06:48:55Z	2026-07-21T06:49:18Z	23
-bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
+2026-07-23T03:28:00Z	2026-07-23T03:29:25Z	1
+2026-07-23T03:29:00Z	2026-07-23T03:29:25Z	1
+69e069d8	2026-07-23T03:29:35Z	2026-07-23T03:30:00Z	25
+9b19c4d6	2026-07-23T03:29:36Z	2026-07-23T03:30:01Z	25
+8e0e812d	2026-07-23T03:30:13Z	2026-07-23T03:30:52Z	39
+5d90b391	2026-07-23T03:30:21Z	2026-07-23T03:30:52Z	31
+2026-07-23T03:31:00Z	2026-07-23T03:31:32Z	3
+2026-07-23T03:32:00Z	2026-07-23T03:32:35Z	5
+2026-07-23T03:33:00Z	2026-07-23T03:33:23Z	5
+observer exit=0, hey exit=0, metric exit=0
 ```
 
+> 👁️ 세 exit code가 모두 0이므로 유효한 시험 B 결과입니다. 기준 instance를 제외한 새 instance 4개가 기록됐고, `InstanceCount`는 1에서 3을 거쳐 5까지 증가했습니다. `instance_count=3`은 1분 구간의 Average이므로 같은 시점에 정확히 3개만 존재했다는 의미가 아니며, 다음 구간의 5와 모순되지 않습니다. metric과 instance 행의 출력 순서는 실행마다 달라질 수 있습니다. 셸이 출력하는 `[1]`, `[2]` job-control 줄은 환경마다 달라 예상 출력에서 생략했습니다.
+>
 > 👁️ 두 시험 모두 같은 앱·같은 엔드포인트·같은 burst 부하를 쓰므로, 비교 대상은 `Prewarmed` 설정 차이와 그에 따라 관찰된 instance 타임라인입니다.
 
 ---
@@ -548,16 +566,18 @@ jq -r '
 echo "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 ```
 
-📋 **예상 출력** (2026-07-21 리허설 예시)
+📋 **예상 출력** (2026-07-23 리허설 예시)
 
 ```text
 trial	instance	started_at	first_seen_at	first_response_age
-Prewarmed=0	a2b002c6	2026-07-21T06:37:27Z	2026-07-21T06:37:49Z	22
-Prewarmed=0	e46cbdac	2026-07-21T06:37:04Z	2026-07-21T06:37:50Z	46
-Prewarmed=0	d09f4aa4	2026-07-21T06:37:20Z	2026-07-21T06:37:50Z	30
-Prewarmed=0	0669595a	2026-07-21T06:37:17Z	2026-07-21T06:37:50Z	33
-Prewarmed=1	5bef3ff3	2026-07-21T06:48:55Z	2026-07-21T06:49:18Z	23
-Prewarmed=1	bd29045b	2026-07-21T06:48:56Z	2026-07-21T06:49:19Z	23
+Prewarmed=0	a2b002c6	2026-07-23T03:22:05Z	2026-07-23T03:22:33Z	28
+Prewarmed=0	5bef3ff3	2026-07-23T03:22:22Z	2026-07-23T03:23:03Z	41
+Prewarmed=0	bd29045b	2026-07-23T03:22:24Z	2026-07-23T03:23:04Z	40
+Prewarmed=0	3122a953	2026-07-23T03:22:16Z	2026-07-23T03:23:04Z	48
+Prewarmed=1	69e069d8	2026-07-23T03:29:35Z	2026-07-23T03:30:00Z	25
+Prewarmed=1	9b19c4d6	2026-07-23T03:29:36Z	2026-07-23T03:30:01Z	25
+Prewarmed=1	8e0e812d	2026-07-23T03:30:13Z	2026-07-23T03:30:52Z	39
+Prewarmed=1	5d90b391	2026-07-23T03:30:21Z	2026-07-23T03:30:52Z	31
 [07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다.
 ```
 
@@ -582,12 +602,12 @@ jq -s -r '
 ' "$NO_PREWARM_OBSERVATIONS" "$PREWARM_OBSERVATIONS"
 ```
 
-📋 **예상 출력** (2026-07-21 리허설 예시)
+📋 **예상 출력** (2026-07-23 리허설 예시)
 
 ```text
 trial	samples	min_age	max_age	range
-Prewarmed=0	4	22	46	24
-Prewarmed=1	2	23	23	0
+Prewarmed=0	4	28	48	20
+Prewarmed=1	4	25	39	14
 ```
 
 ### 무엇이 Prewarmed의 이점인가
@@ -606,20 +626,21 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 `started_at`은 인위적인 `STARTUP_DELAY_SECONDS=20` 적용 전에 기록되므로 약 20초의 readiness floor가 있습니다.
 
-- Trial A(Prewarmed=0)는 4개 instance가 22–46초에 처음 관찰됐고, 최댓값 46초·범위 24초로 긴 지연 꼬리와 큰 편차가 있었습니다.
-- Trial B(Prewarmed=1)는 2개 instance가 모두 23초에 관찰되어 readiness floor에 가까웠고, 이번 실행에서는 긴 지연 꼬리가 보이지 않았습니다.
-- 가장 빠른 값은 A 22초, B 23초이므로 “Prewarmed가 가장 빠른 instance를 더 빠르게 만들었다”는 결과는 아닙니다. 이번 실측에서 보인 이점은 **새 capacity가 준비 하한 근처에서 더 일관되게 응답에 투입되고, 긴 tail이 관찰될 위험이 낮아진 모습**입니다.
+- Trial A(Prewarmed=0)는 4개 instance가 28–48초에 처음 관찰됐고, 최댓값 48초·범위 20초였습니다.
+- Trial B(Prewarmed=1)는 4개 instance가 25–39초에 처음 관찰됐고, 최댓값 39초·범위 14초였습니다.
+- 이번 실행에서 B의 최솟값은 A보다 3초, 최댓값은 9초 낮았고 범위는 6초 좁았습니다. 같은 수의 표본에서 B의 관찰값이 전반적으로 더 낮고 덜 퍼진 **기술 통계**가 나타났습니다.
 
-운영 관점에서는 갑작스러운 HTTP 부하에서 일부 새 instance의 투입이 오래 지연되는 경우를 줄여, 기존 instance에 부하가 오래 집중되거나 응답 지연이 길어질 위험을 완화하는 것이 Prewarmed의 가치입니다.
+이 결과는 갑작스러운 HTTP 부하에서 Prewarmed가 새 처리 capacity의 준비 지연을 완화하는 warmed-buffer 메커니즘과 부합합니다. 다만 `InstanceCount`는 두 시험 모두 최종 5까지 증가했고 `PT1M` Average와 수집 지연이 있으므로, 이 메트릭만으로 B의 내부 scale-out 또는 allocation 자체가 더 빨랐다고 판단하지 않습니다.
 
 ### 이 결과가 증명하지 않는 것
 
-- 단일 실행이며 표본 수도 4개 대 2개로 다르므로 통계적 우위나 개선 비율을 계산할 수 없습니다.
+- 단일 A/B 실행이며 표본 수도 각 4개로 작으므로 통계적 우위나 일반적인 성능 개선 비율로 일반화할 수 없습니다.
+- 위 차이는 이번 실행에서 관찰된 기술 통계이며, 반복 시험의 신뢰구간이나 유의성 검정 결과가 아닙니다.
 - `first_seen_at`은 클라이언트 observer가 처음 응답을 받은 시각이며 Azure 내부의 정확한 activation·routing 시각이 아닙니다.
 - `InstanceCount`는 배포된 Prewarmed instance를 포함할 수 있지만, 개별 instance의 active/Prewarmed 상태를 구분하지 않습니다.
 - 이 시험은 사용자 요청의 latency·오류율이나 Azure 내부 allocation 이벤트를 수집하지 않습니다.
 
-따라서 결과는 공식 warmed-buffer 메커니즘과 **일관된 방향의 외부 관찰 증거**이지만, Prewarmed가 차이를 만들었다는 인과관계를 증명하지는 않습니다.
+따라서 이번 결과는 공식 warmed-buffer 메커니즘과 부합하는 **단일 실행의 외부 관찰 증거**이지만, Prewarmed가 차이를 만들었다는 인과관계를 증명하지는 않습니다.
 
 ### 다른 결과가 나오면
 
