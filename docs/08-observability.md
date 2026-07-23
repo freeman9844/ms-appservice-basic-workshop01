@@ -124,6 +124,8 @@ AppServiceHTTPLogs
 | order by hits desc
 ```
 
+![Log Analytics에서 AppServiceHTTPLogs KQL 결과 확인](images/08-log-analytics-kql-results.png)
+
 ---
 
 ## 4단계 — App Insights 커넥션 스트링 주입

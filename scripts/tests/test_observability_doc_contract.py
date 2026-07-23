@@ -42,3 +42,13 @@ def test_module_troubleshooting_keeps_extension_recovery_commands():
         "az extension add --name application-insights"
         in observability_troubleshooting
     )
+
+
+def test_step_three_uses_log_analytics_results_image():
+    image_reference = (
+        "![Log Analytics에서 AppServiceHTTPLogs KQL 결과 확인]"
+        "(images/08-log-analytics-kql-results.png)"
+    )
+
+    assert image_reference in OBSERVABILITY
+    assert (ROOT / "docs/images/08-log-analytics-kql-results.png").is_file()
