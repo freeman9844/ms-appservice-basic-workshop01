@@ -76,3 +76,19 @@ def test_cloud_shell_msi_error_explains_workspace_query_path():
     assert "지원하지 않는 MSI token audience" in observability_troubleshooting
     assert "```bash\naz logout" not in observability_troubleshooting
     assert "AppRequests" in observability_troubleshooting
+
+
+def test_step_four_waits_for_restart_and_telemetry_ingestion():
+    observability_main = main_content(OBSERVABILITY)
+    step_four = observability_main.split(
+        "## 4단계 — App Insights 커넥션 스트링 주입", 1
+    )[1]
+
+    assert "HEALTH_CHECK_STATUS=1" in step_four
+    assert "for attempt in $(seq 1 18); do" in step_four
+    assert 'curl -fsS --max-time 10 "$APP_URL/health"' in step_four
+    assert 'curl -fsS "$APP_URL/api/info" > /dev/null' in step_four
+    assert "for attempt in $(seq 1 10); do" in step_four
+    assert "APP_REQUEST_COUNT=" in step_four
+    assert "sleep 30" in step_four
+    assert "AppRequests 적재 확인 실패" in step_four

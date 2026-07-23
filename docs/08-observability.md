@@ -138,23 +138,70 @@ az webapp config appsettings set -g $RG -n $APP \
   --settings APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN"
 ```
 
-> 👁️ 앱 설정 변경은 앱을 자동 재시작합니다. 재시작이 완료된 뒤 트래픽을 추가로 발생시켜야 SDK가 텔레메트리를 전송합니다.
+> 👁️ 앱 설정 변경은 앱을 자동 재시작합니다. `/health`가 다시 정상 응답한 뒤에만 트래픽을 생성합니다. 준비 확인 없이 `curl -s`를 바로 실행하면 재시작 중 요청 실패가 숨겨져 텔레메트리가 생성되지 않을 수 있습니다.
 
-🟢 **실행** — 재시작 후 트래픽을 추가 생성합니다.
+🟢 **실행** — 앱 재시작 완료를 확인합니다.
 
 ```bash
-for i in $(seq 1 20); do curl -s $APP_URL/api/info > /dev/null; done
+HEALTH_CHECK_STATUS=1
+for attempt in $(seq 1 18); do
+  if curl -fsS --max-time 10 "$APP_URL/health" |
+    jq -e '.status == "ok"' > /dev/null
+  then
+    HEALTH_CHECK_STATUS=0
+    break
+  fi
+  if [ "$attempt" -lt 18 ]; then sleep 5; fi
+done
+
+if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
+  echo "앱 재시작 후 /health 확인 실패: 트래픽을 생성하지 마세요." >&2
+  false
+fi
 ```
 
-🟢 **실행** — 수 분 뒤 같은 LAW의 workspace 기반 App Insights 테이블인 `AppRequests`를 조회합니다. Cloud Shell에서는 `api.applicationinsights.io` audience가 지원되지 않을 수 있으므로 `az monitor app-insights query` 대신 3단계와 같은 `az monitor log-analytics query`를 사용합니다.
+🟢 **실행** — 정상 응답을 확인하면서 트래픽을 추가 생성합니다.
+
+```bash
+for i in $(seq 1 20); do
+  curl -fsS "$APP_URL/api/info" > /dev/null
+done
+```
+
+🟢 **실행** — 같은 LAW의 workspace 기반 App Insights 테이블인 `AppRequests`를 최대 5분간 확인합니다. Cloud Shell에서는 `api.applicationinsights.io` audience가 지원되지 않을 수 있으므로 `az monitor app-insights query` 대신 3단계와 같은 `az monitor log-analytics query`를 사용합니다.
 
 ```bash
 LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
 APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
+
+APP_REQUEST_COUNT=0
+for attempt in $(seq 1 10); do
+  APP_REQUEST_COUNT=$(az monitor log-analytics query \
+    -w "$LAW_CID" \
+    --analytics-query \
+    "AppRequests
+     | where TimeGenerated > ago(30m)
+     | where _ResourceId =~ '$APPI_ID'
+     | where Name == 'GET /api/info'
+     | summarize request_count=sum(ItemCount)" \
+    --query "[0].request_count" -o tsv 2>/dev/null || true)
+
+  if [ "${APP_REQUEST_COUNT:-0}" -gt 0 ] 2>/dev/null; then
+    break
+  fi
+  if [ "$attempt" -lt 10 ]; then sleep 30; fi
+done
+
+if [ "${APP_REQUEST_COUNT:-0}" -le 0 ] 2>/dev/null; then
+  echo "AppRequests 적재 확인 실패: 트러블슈팅 (2)를 확인하세요." >&2
+  false
+fi
+
 az monitor log-analytics query -w $LAW_CID --analytics-query \
   "AppRequests
-   | where TimeGenerated > ago(15m)
+   | where TimeGenerated > ago(30m)
    | where _ResourceId =~ '$APPI_ID'
+   | where Name == 'GET /api/info'
    | summarize count=sum(ItemCount) by name=Name" -o table
 ```
 
