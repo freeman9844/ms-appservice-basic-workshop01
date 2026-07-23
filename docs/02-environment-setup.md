@@ -78,16 +78,13 @@ az monitor log-analytics workspace create -g $RG -n $LAW -l $LOC
 #    명령 결과를 LAW_ID 셸 변수에 저장
 LAW_ID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query id -o tsv)
 
-# 6. Application Insights 관리 명령을 제공하는 CLI 확장 설치·업그레이드
-az extension add --name application-insights --upgrade --only-show-errors
-
-# 7. Log Analytics Workspace와 연결된 Application Insights 컴포넌트 생성
+# 6. Log Analytics Workspace와 연결된 Application Insights 컴포넌트 생성
 az monitor app-insights component create -g $RG --app $APPI -l $LOC --workspace $LAW_ID
 
-# 8. Web App의 Azure 기본 호스트 이름을 조회해 HTTPS 접속 URL 구성
+# 7. Web App의 Azure 기본 호스트 이름을 조회해 HTTPS 접속 URL 구성
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
 
-# 9. 브라우저와 이후 모듈에서 사용할 앱 URL 출력
+# 8. 브라우저와 이후 모듈에서 사용할 앱 URL 출력
 echo $APP_URL
 ```
 
