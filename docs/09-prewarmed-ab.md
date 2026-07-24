@@ -301,7 +301,7 @@ for attempt in $(seq 1 30); do
     awk 'NF { count++ } END { print count + 0 }')
   LATEST_INSTANCE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
     awk 'NF { latest=$1 } END { print latest }')
-  printf 'Trial A scale-in gate %02d/30 samples=%s latest=%s\n' \
+  printf 'Trial A single-instance gate %02d/30 samples=%s latest=%s\n' \
     "$attempt" "$FRESH_SAMPLE_COUNT" "${LATEST_INSTANCE_COUNT:-pending}"
 
   if [ "$FRESH_SAMPLE_COUNT" -ge 2 ] &&
@@ -325,9 +325,9 @@ fi
 📋 **예상 출력**
 
 ```text
-Trial A scale-in gate 01/30 samples=0 latest=pending
-Trial A scale-in gate 03/30 samples=1 latest=1.0
-Trial A scale-in gate 05/30 samples=2 latest=1.0
+Trial A single-instance gate 01/30 samples=0 latest=pending
+Trial A single-instance gate 03/30 samples=1 latest=1.0
+Trial A single-instance gate 05/30 samples=2 latest=1.0
 ```
 
 🟢 **실행 — 시험 A 관찰**
@@ -411,9 +411,9 @@ observer exit=0, hey exit=0, metric exit=0
 
 ---
 
-## 4단계 — scale-in 게이트 후 시험 B: Prewarmed=1
+## 4단계 — 단일 인스턴스 기준선 확보 후 시험 B: Prewarmed=1
 
-시험 B는 반드시 시험 A의 부하가 끝나고 새 기준 상태가 다시 확보된 뒤 시작합니다. `Prewarmed=1`로 되돌린 뒤에도 별도의 prime 부하나 `InstanceCount>=2` 버퍼 게이트는 두지 않고, 같은 burst에서 새 instance의 최초 응답 나이를 다시 관찰합니다.
+시험 B는 반드시 시험 A의 부하가 끝나고 새 기준 상태가 다시 확보된 뒤 시작합니다. 이 게이트는 scale-in 자체를 관찰하려는 것이 아니라, 시험 A로 늘어난 인스턴스가 남아 있으면 시험 B에서 scale-out이 일어나지 않아 비교가 무효가 되므로 **두 시험이 같은 단일 인스턴스 기준선에서 시작하도록 보장하는 통제 장치**입니다. `Prewarmed=1`로 되돌린 뒤에도 별도의 prime 부하나 `InstanceCount>=2` 버퍼 게이트는 두지 않고, 같은 burst에서 새 instance의 최초 응답 나이를 다시 관찰합니다.
 
 🟢 **실행 — 시험 B 시작 전 단일 인스턴스 기준 상태 확인**
 
@@ -436,7 +436,7 @@ for attempt in $(seq 1 30); do
     awk 'NF { count++ } END { print count + 0 }')
   LATEST_INSTANCE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
     awk 'NF { latest=$1 } END { print latest }')
-  printf 'Trial B scale-in gate %02d/30 samples=%s latest=%s\n' \
+  printf 'Trial B single-instance gate %02d/30 samples=%s latest=%s\n' \
     "$attempt" "$FRESH_SAMPLE_COUNT" "${LATEST_INSTANCE_COUNT:-pending}"
 
   if [ "$FRESH_SAMPLE_COUNT" -ge 2 ] &&
@@ -460,9 +460,9 @@ fi
 📋 **예상 출력**
 
 ```text
-Trial B scale-in gate 01/30 samples=0 latest=pending
+Trial B single-instance gate 01/30 samples=0 latest=pending
 ...
-Trial B scale-in gate 09/30 samples=2 latest=1.0
+Trial B single-instance gate 09/30 samples=2 latest=1.0
 ```
 
 > 👁️ 별도의 prime 부하나 `InstanceCount>=2` 확인은 하지 않습니다.
@@ -574,7 +574,7 @@ observer exit=0, hey exit=0, metric exit=0
 
 ## 5단계 — 기본 상태 복원 및 결과 해석
 
-두 시험 모두에서 새 instance가 관찰되었다면, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
+먼저 확인할 것은 **Automatic Scaling의 scale-out 자체가 두 시험 모두에서 동작했다는 사실**입니다. 각 시험에서 burst 부하에 따라 `InstanceCount`가 1에서 Maximum burst 5까지 증가했고, 기준 instance 외 새 instance 4개가 실제 응답에 투입됐습니다. 이 scale-out 성공을 전제로, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
 
 🟢 **실행 — 모듈 기본 상태로 복원**
 
