@@ -55,10 +55,12 @@ STG_URL=https://app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net
 🟢 **실행**
 
 ```bash
+# staging 슬롯으로 20%를 분기하는 규칙을 만들고, show로 현재 적용된 비율을 즉시 읽어옵니다.
 az webapp traffic-routing set -g $RG -n $APP --distribution staging=20
 az webapp traffic-routing show -g $RG -n $APP -o table
 
-# 쿠키를 저장하지 않는 curl 100회 → 버전 분포 측정
+# 쿠키를 저장하지 않는 요청을 100번 보내 슬롯 고정을 피합니다.
+# 각 응답에서 version만 추출한 뒤 정렬하고, 같은 값끼리 묶어 v1/v2 개수를 셉니다.
 for i in $(seq 1 100); do curl -s $APP_URL/api/info | jq -r .version; done | sort | uniq -c
 ```
 
@@ -154,7 +156,8 @@ v1
 🟢 **실행**
 
 ```bash
-# 20% 분기 규칙을 제거하고 staging의 v2를 production으로 승격합니다.
+# traffic-routing clear로 분기 규칙을 지워 전체 트래픽을 다시 production 100%로 돌립니다.
+# 그다음 staging의 v2를 production으로 승격하고 마지막 요청으로 최종 버전을 확인합니다.
 az webapp traffic-routing clear -g $RG -n $APP
 az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
 curl -s $APP_URL/api/info | jq -r .version   # v2 — 승격 완료

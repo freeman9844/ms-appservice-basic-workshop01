@@ -107,8 +107,12 @@ az webapp deployment slot create -g $RG -n $APP --slot staging --configuration-s
 🟢 **실행**
 
 ```bash
-# 소스 버전을 v2로 바꾸어 배포 패키지를 만든 뒤 로컬 소스는 v1로 복원합니다.
-# v2 패키지를 staging 슬롯에 배포하고 슬롯 응답을 확인합니다.
+# 워크숍 앱 소스 디렉터리로 이동해 패키징 대상 파일을 정확히 맞춥니다.
+# app.py의 VERSION만 잠시 v2로 치환해 배포용 아카이브에 새 버전을 담습니다.
+# tests, __pycache__, *.pyc는 실행에 불필요하므로 zip에서 제외합니다.
+# 아카이브를 만든 직후 app.py를 되돌려 로컬 작업 트리는 v1 상태로 유지합니다.
+# 준비한 v2 zip을 staging 슬롯에 배포하고 staging 기본 호스트 이름을 조회합니다.
+# 마지막 요청으로 staging 슬롯이 실제로 v2 응답을 반환하는지 검증합니다.
 cd ~/ms-appservice-basic-workshop01/app
 sed -i 's#^VERSION = "v1"#VERSION = "v2"#' app.py
 grep '^VERSION' app.py   # VERSION = "v2" 확인(치환 검증 — 미치환 방지)
@@ -154,7 +158,7 @@ curl -s $STG_URL/api/info | jq '{version, slot}'
 🟢 **실행**
 
 ```bash
-# staging의 v2를 production으로 스왑하고 두 슬롯의 버전을 확인합니다.
+# staging 슬롯의 v2를 production으로 올리고, 이어진 두 요청으로 production=v2와 staging=v1 보존을 확인합니다.
 az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
 curl -s $APP_URL/api/info | jq -r .version    # v2 — 무중단 전환
 curl -s $STG_URL/api/info | jq -r .version    # v1 — 이전 버전이 슬롯에 보존
@@ -180,7 +184,8 @@ v1
 🟢 **실행**
 
 ```bash
-# 문제 발견 가정 → 재스왑 = 즉시 롤백
+# 같은 swap 명령을 한 번 더 실행하면 두 슬롯 내용이 다시 뒤바뀌며 production은 즉시 v1로 복원됩니다.
+# 이어서 production URL로 복구를 확인하고, staging URL은 이후 확인 시 v2가 유지된 상태여야 합니다.
 az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
 curl -s $APP_URL/api/info | jq -r .version    # v1
 ```

@@ -75,13 +75,17 @@ Autoscale은 App Service Plan 전체에 적용되는 규칙 기반 수평 확장
 🟢 **실행**
 
 ```bash
-# Automatic Scaling을 끄고 Plan을 worker 1개로 맞춥니다.
+# Autoscale은 Plan 기준 규칙을 쓰므로 먼저 Automatic Scaling을 꺼서 두 확장 방식이 동시에 경쟁하지 않게 합니다.
+# 같은 PATCH에서 Plan capacity도 1로 맞춰 Autoscale 시작 기준 인스턴스를 고정합니다.
 az rest --method patch \
   --uri "${PLAN_ID}?api-version=2024-11-01" \
   --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":false}}' \
   --output none &&
 
-# 재실행 시 중복되지 않도록 이 Plan을 대상으로 하는 기존 Autoscale 설정을 모두 제거합니다.
+# 재실행 시 중복 생성을 막기 위해 이 Plan을 대상으로 하는 기존 Autoscale 설정만 찾아 삭제합니다.
+# pipefail은 jq나 az monitor autoscale list가 실패해도 파이프라인 전체를 즉시 실패로 만들기 위한 안전장치입니다.
+# targetResourceUri와 PLAN_ID를 모두 소문자로 바꿔 리소스 ID 대소문자 차이 없이 정확히 같은 Plan만 고릅니다.
+# xargs -r -n 1은 찾은 Autoscale ID를 하나씩 az monitor autoscale delete에 넘기고, ID가 없으면 삭제를 건너뜁니다.
 if ! (
   set -o pipefail
   az monitor autoscale list -g "$RG" -o json |
@@ -152,7 +156,7 @@ Usage: hey [options...] <url>
 🟢 **실행**
 
 ```bash
-# Plan의 인스턴스 범위와 CPU 기반 scale-out·scale-in 규칙을 만듭니다.
+# Autoscale profile의 capacity를 minimum 1, default 1, maximum 3으로 만들어 1개에서 시작해 최대 3개까지 확장되게 합니다.
 az monitor autoscale create \
   -g "$RG" \
   -n "$AUTOSCALE" \
@@ -162,6 +166,7 @@ az monitor autoscale create \
   --count 1 \
   --output none &&
 
+# CPU 1분 평균이 20%를 넘으면 worker를 1개 늘리고, cooldown 1분 동안은 같은 방향의 추가 확장을 잠시 멈춥니다.
 az monitor autoscale rule create \
   -g "$RG" \
   --autoscale-name "$AUTOSCALE" \
@@ -170,6 +175,7 @@ az monitor autoscale rule create \
   --cooldown 1 \
   --output none &&
 
+# CPU 1분 평균이 10% 미만이면 worker를 1개 줄이고, cooldown 1분으로 급격한 축소 반복을 막습니다.
 az monitor autoscale rule create \
   -g "$RG" \
   --autoscale-name "$AUTOSCALE" \
@@ -243,7 +249,9 @@ az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
 🟢 **실행**
 
 ```bash
-# 앱 준비 상태, 현재 worker 수와 최신 CPU 평균을 확인합니다.
+# /health가 ok를 반환하는지 먼저 확인해 부하를 주기 전 앱이 정상 준비 상태인지 점검합니다.
+# capacity는 현재 Plan worker 수이고, CPU는 최근 10분에서 average가 null이 아닌 가장 최신 1분 평균값만 읽습니다.
+# 아직 메트릭이 수집되지 않았다면 빈 값을 pending으로 바꿔 기준선이 비어 있음을 명확히 표시합니다.
 curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'
 
 CAPACITY=$(az appservice plan show -g "$RG" -n "$PLAN" --query sku.capacity -o tsv)
@@ -378,7 +386,7 @@ az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
 az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
   --query "{enabled:enabled,profile:profiles[0]}" -o json
 
-# 최근 CPU 메트릭을 확인합니다.
+# 최근 15분 CPU 메트릭 테이블로 임계값 20%를 실제로 넘겼는지 확인합니다.
 az monitor metrics list \
   --resource "$PLAN_ID" \
   --metric CpuPercentage \
@@ -387,11 +395,11 @@ az monitor metrics list \
   --start-time "$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
   -o table
 
-# CPU 부하 엔드포인트가 정상 응답하는지 짧게 확인합니다.
+# /load 엔드포인트를 직접 짧게 호출해 부하 생성 경로 자체가 정상 응답하는지 먼저 분리 점검합니다.
 curl -fsS "$APP_URL/load?sec=2" | jq .
 ```
 
-- 최신 CPU가 20%를 넘지 않았다면 `-n 15`로 요청 수만 늘려 약 300초 부하를 한 번 재시도합니다.
+- 최신 CPU가 20%를 넘지 않았다면 `-n 15`로 요청 수만 늘려 약 300초 부하를 다시 걸어 1분 평균 CPU가 임계값을 넘을 시간을 더 확보합니다.
 - Autoscale target이 Web App이 아니라 `$PLAN_ID`인지 확인합니다.
 - profile이 enabled이고 scale-out 규칙이 `CpuPercentage > 20 avg 1m`인지 확인합니다.
 
