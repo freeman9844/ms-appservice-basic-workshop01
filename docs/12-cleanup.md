@@ -23,6 +23,7 @@
 🟢 **실행**
 
 ```bash
+# 정리할 워크숍 리소스 그룹 이름을 이전 SUFFIX로 복원합니다.
 SUFFIX=<이전에_메모한_값>
 RG=rg-appsvcworkshop-$SUFFIX
 echo "RG=$RG"
@@ -43,6 +44,7 @@ RG=rg-appsvcworkshop-<SUFFIX>
 🟢 **실행**
 
 ```bash
+# App Service, Plan, Log Analytics, Application Insights를 포함한 리소스 그룹 삭제를 시작합니다.
 az group delete -n $RG --yes --no-wait
 ```
 
@@ -75,6 +77,7 @@ RG 삭제는 수 분이 소요됩니다. 아래 명령으로 삭제 완료 여�
 🟢 **실행** — 수 분 후 확인
 
 ```bash
+# 리소스 그룹과 선택적 Entra 앱 등록이 삭제되었는지 확인합니다.
 az group exists -n $RG            # false
 az ad app list --display-name "auth-appsvcworkshop-$SUFFIX" -o table   # 빈 목록
 ```
@@ -114,6 +117,7 @@ DisplayName    Id    AppId
 🟢 **실행 (선택)**
 
 ```bash
+# 리허설과 관찰 과정에서 생성한 로컬 임시 파일만 삭제합니다.
 rm -f $HOME/go/bin/hey
 ```
 
@@ -124,6 +128,7 @@ rm -f $HOME/go/bin/hey
 🟢 **실행** (수 분 후)
 
 ```bash
+# Azure 리소스와 Entra 앱 등록이 남아 있지 않은지 최종 확인합니다.
 az group exists -n $RG
 az ad app list --display-name "auth-appsvcworkshop-$SUFFIX" -o table
 ```

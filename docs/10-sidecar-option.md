@@ -36,6 +36,7 @@ flowchart LR
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 Web App URL을 다시 계산합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -122,6 +123,7 @@ curl -s $APP_URL/cache | jq
 🟢 **실행** — `az webapp sitecontainers create` 명령으로 MCR 미러 Redis 이미지를 사이드카로 부착하고 앱을 재시작합니다.
 
 ```bash
+# Redis를 보조 컨테이너로 추가하고 Web App을 재시작해 새 컨테이너 구성을 적용합니다.
 az webapp sitecontainers create -g $RG -n $APP --container-name redis \
   --image mcr.microsoft.com/mirror/docker/library/redis:7.2 --is-main false
 az webapp restart -g $RG -n $APP
@@ -134,6 +136,7 @@ az webapp restart -g $RG -n $APP
 🟢 **실행** — 사이드카 목록을 확인합니다.
 
 ```bash
+# Web App에 연결된 main·sidecar 컨테이너 목록을 확인합니다.
 az webapp sitecontainers list -g $RG -n $APP -o table
 ```
 
@@ -156,6 +159,7 @@ Anonymous   2026-07-24T02:24:37.850000  mcr.microsoft.com/mirror/docker/library/
 🟢 **실행** — 인스턴스 수 확인
 
 ```bash
+# 여러 인스턴스에서 증가 결과가 갈라지지 않도록 현재 인스턴스 수를 확인합니다.
 az webapp list-instances -g $RG -n $APP -o table
 ```
 

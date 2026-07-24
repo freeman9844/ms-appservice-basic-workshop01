@@ -26,6 +26,7 @@
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 Web App URL을 다시 계산합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -98,6 +99,7 @@ Auto-heal의 전제는 "느린 응답의 원인이 **프로세스 내부에 누�
 🟢 **실행**
 
 ```bash
+# /slow와 /api/info를 직접 호출할 수 있도록 Easy Auth를 일시 비활성화합니다.
 az webapp auth update -g $RG -n $APP --enabled false
 ```
 
@@ -110,12 +112,14 @@ az webapp auth update -g $RG -n $APP --enabled false
 🟢 **실행** — 인스턴스 수 확인
 
 ```bash
+# Auto-heal 요청 횟수가 한 인스턴스에 모이도록 현재 인스턴스 수를 확인합니다.
 az webapp list-instances -g $RG -n $APP -o table
 ```
 
 🟢 **실행** — Auto-heal 규칙을 설정합니다. 2분 이내에 3초를 초과하는 요청이 5회 이상 발생하면 워커 프로세스를 재활용합니다.
 
 ```bash
+# 3초 초과 요청이 2분 동안 5회 발생하면 프로세스를 재활용하도록 Auto-heal을 설정합니다.
 az resource update -g $RG --resource-type "Microsoft.Web/sites/config" \
   --name "$APP/config/web" \
   --set properties.autoHealEnabled=true \
@@ -239,6 +243,7 @@ curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로�
 🟢 **실행** (4단계 트리거 후 60–90초 대기)
 
 ```bash
+# started_at 변경으로 프로세스 재활용 여부를 최종 확인합니다.
 curl -s $APP_URL/api/info | jq -r .started_at
 ```
 

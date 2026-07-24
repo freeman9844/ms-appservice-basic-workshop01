@@ -35,6 +35,7 @@ flowchart LR
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 Web App URL을 다시 계산합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -118,10 +119,12 @@ echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 12 정리에서 필요 — 메모
 🟢 **실행** — Microsoft 공급자를 구성한 뒤 Easy Auth를 활성화합니다.
 
 ```bash
+# 인증 설정을 auth v2 스키마로 올리고 Microsoft Entra 공급자를 연결합니다.
 az webapp auth config-version upgrade -g $RG -n $APP
 az webapp auth microsoft update -g $RG -n $APP \
   --client-id $CLIENT_ID --client-secret "$CLIENT_SECRET" \
   --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes
+# 미인증 브라우저 요청을 Entra 로그인 페이지로 보내도록 Easy Auth를 활성화합니다.
 az webapp auth update -g $RG -n $APP --enabled true \
   --action RedirectToLoginPage --redirect-provider azureActiveDirectory
 ```
@@ -131,6 +134,7 @@ az webapp auth update -g $RG -n $APP --enabled true \
 🟢 **실행** — 설정 전파 후 HTTP 상태 코드를 확인합니다(전파가 완료되지 않았으면 30초 대기 후 재시도).
 
 ```bash
+# API 클라이언트와 브라우저 요청이 각각 401과 302를 반환하는지 확인합니다.
 curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/
 curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 ```

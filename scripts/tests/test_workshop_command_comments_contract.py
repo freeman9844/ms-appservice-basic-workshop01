@@ -14,6 +14,10 @@ MODULES = [
     "06-traffic-split-canary.md",
     "07-autoscale.md",
     "08-observability.md",
+    "09-easy-auth.md",
+    "10-sidecar-option.md",
+    "11-autoheal-option.md",
+    "12-cleanup.md",
 ]
 
 
