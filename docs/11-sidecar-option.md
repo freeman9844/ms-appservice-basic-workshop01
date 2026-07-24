@@ -82,6 +82,8 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 
 ```bash
 # curl 검증을 위해 Easy Auth 일시 비활성화
+# 이 선택 모듈은 인증 게이트를 잠시 내린 상태로 /cache를 반복 호출해 Redis 동작을 볼 수 있게 하며,
+# 이후 모듈 12도 같은 검증 편의를 위해 비활성 상태를 그대로 전제로 시작합니다.
 az webapp auth update -g $RG -n $APP --enabled false
 ```
 
@@ -124,6 +126,8 @@ curl -s $APP_URL/cache | jq
 
 ```bash
 # Redis를 보조 컨테이너로 추가하고 Web App을 재시작해 새 컨테이너 구성을 적용합니다.
+# --container-name redis 는 이후 조회·REST 대체 경로에서 같은 이름으로 식별할 sidecar 이름이고,
+# --image 는 App Service가 pull할 Redis 이미지, --is-main false 는 이 컨테이너가 주 앱이 아닌 sidecar임을 뜻합니다.
 az webapp sitecontainers create -g $RG -n $APP --container-name redis \
   --image mcr.microsoft.com/mirror/docker/library/redis:7.2 --is-main false
 az webapp restart -g $RG -n $APP
@@ -137,6 +141,8 @@ az webapp restart -g $RG -n $APP
 
 ```bash
 # Web App에 연결된 main·sidecar 컨테이너 목록을 확인합니다.
+# 여기서는 sidecar 리소스 메타데이터(Name/Image/IsMain)를 확인하고,
+# 바로 뒤 /cache 호출에서는 주 앱이 localhost:6379의 Redis sidecar와 실제로 통신하는지 검증합니다.
 az webapp sitecontainers list -g $RG -n $APP -o table
 ```
 
@@ -167,6 +173,7 @@ az webapp list-instances -g $RG -n $APP -o table
 
 ```bash
 # 60초 후
+# 두 호출을 연속 비교해 main app 응답의 visits 값이 증가하는지 보면 sidecar 연결 상태를 간접 확인할 수 있습니다.
 curl -s $APP_URL/cache | jq
 curl -s $APP_URL/cache | jq   # visits 증가 확인
 ```

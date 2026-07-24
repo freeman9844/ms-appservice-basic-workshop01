@@ -120,6 +120,8 @@ az webapp list-instances -g $RG -n $APP -o table
 
 ```bash
 # 3초 초과 요청이 2분 동안 5회 발생하면 프로세스를 재활용하도록 Auto-heal을 설정합니다.
+# autoHealEnabled=true를 켠 뒤 slowRequests 트리거와 Recycle 액션을 한 JSON 객체로 한 번에 써서,
+# null 상태의 autoHealRules에도 부분 병합 없이 원하는 기준(count/timeInterval/timeTaken/minProcessExecutionTime)을 그대로 기록합니다.
 az resource update -g $RG --resource-type "Microsoft.Web/sites/config" \
   --name "$APP/config/web" \
   --set properties.autoHealEnabled=true \
@@ -159,6 +161,7 @@ az resource update -g $RG --resource-type "Microsoft.Web/sites/config" \
 
 ```bash
 # 90초 실제 대기(minProcessExecutionTime 창 회피) 후 변경 전 시작 시각 기록
+# started_at 기준값은 "규칙 적용 후 다시 시작된 현재 프로세스"의 시각이어야 하므로 먼저 sleep 90으로 보호 창을 넘깁니다.
 sleep 90
 curl -s $APP_URL/api/info | jq -r .started_at
 ```
@@ -181,6 +184,7 @@ curl -s $APP_URL/api/info | jq -r .started_at
 
 ```bash
 # 트리거: 3초 초과 요청을 2분 안에 5회 이상 → /slow(5초)를 6회
+# 6회를 보내는 이유는 임계값 5회를 여유 있게 넘겨 slowRequests 누락 가능성을 줄이기 위해서입니다.
 for i in $(seq 1 6); do curl -s "$APP_URL/slow?sec=5" > /dev/null; echo "slow $i/6"; done
 ```
 
@@ -207,6 +211,7 @@ Auto-heal이 트리거된 후 워커 프로세스가 재활용되기까지 60–
 
 ```bash
 # 90초 실제 대기 — 트리거 감지 후 Recycle 실행까지 60–90초 소요
+# 여기서 읽는 started_at을 3단계 메모값과 비교해 더 늦은 시각으로 바뀌었는지 판단하면 Recycle 성공 여부를 확인할 수 있습니다.
 sleep 90
 curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로세스 재활용됨
 ```
@@ -244,6 +249,7 @@ time curl -s "$APP_URL/slow?sec=5" > /dev/null
 Easy Auth가 아직 활성 상태입니다(모듈 10 수행자만 해당). 1단계 명령을 재실행합니다.
 
 ```bash
+# 403은 Auto-heal 실패가 아니라 Easy Auth가 여전히 앞단에서 /api/info·/slow 요청을 막고 있다는 신호입니다.
 az webapp auth update -g $RG -n $APP --enabled false
 ```
 

@@ -86,6 +86,9 @@ az extension add --name authV2 --upgrade --only-show-errors
 TENANT_ID=$(az account show --query tenantId -o tsv)
 
 # 사용자 로그인을 받을 웹앱의 App Registration을 생성합니다.
+# display-name은 13 정리에서 같은 이름으로 다시 조회·삭제할 App Registration 식별자입니다.
+# redirect URI는 현재 Web App 기본 호스트 이름(APP_URL)에 Easy Auth 콜백 경로를 붙인 값이어야 하며,
+# 이후 브라우저가 로그인 후 되돌아올 주소와 한 글자라도 다르면 AADSTS 리디렉션 불일치가 발생합니다.
 # Easy Auth 콜백 URI와 단일 테넌트 범위를 지정하고,
 # Application(Client) ID를 CLIENT_ID에 저장합니다.
 CLIENT_ID=$(az ad app create --display-name "auth-appsvcworkshop-$SUFFIX" \
@@ -99,6 +102,9 @@ az ad app update --id $CLIENT_ID --enable-id-token-issuance true
 # Easy Auth가 Entra ID에 애플리케이션 자신을 증명할 Client Secret을 생성합니다.
 # 사용자는 이 시크릿이 아니라 자신의 Entra 계정으로 로그인합니다.
 # Managed Identity를 생성하거나 활성화하는 단계가 아닙니다.
+# 이 워크숍 흐름은 별도 service principal 생성 명령(예: az ad sp create)을 실행하지 않습니다.
+# 다른 가이드에서 보이는 "already exists" 메시지는 기존 앱 등록에 연결된 service principal 재생성 흐름에서만
+# 흔히 허용되는 것이며, 여기서는 CLIENT_ID와 secret만 있으면 이후 Easy Auth 구성이 완료됩니다.
 CLIENT_SECRET=$(az ad app credential reset --id $CLIENT_ID --display-name easyauth \
   --query password -o tsv)
 
@@ -120,6 +126,7 @@ echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 13 정리에서 필요 — 메모
 
 ```bash
 # 인증 설정을 auth v2 스키마로 올리고 Microsoft Entra 공급자를 연결합니다.
+# 방금 만든 App Registration의 CLIENT_ID/CLIENT_SECRET과 현재 테넌트 issuer를 Web App auth 설정에 묶습니다.
 az webapp auth config-version upgrade -g $RG -n $APP
 az webapp auth microsoft update -g $RG -n $APP \
   --client-id $CLIENT_ID --client-secret "$CLIENT_SECRET" \
@@ -135,6 +142,7 @@ az webapp auth update -g $RG -n $APP --enabled true \
 
 ```bash
 # API 클라이언트와 브라우저 요청이 각각 401과 302를 반환하는지 확인합니다.
+# 첫 curl은 비브라우저 기본 동작(401), 두 번째 curl은 브라우저 User-Agent를 흉내 낸 리디렉션(302) 확인용입니다.
 curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/
 curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 ```
