@@ -273,54 +273,6 @@ GET /workshop-not-found  404           false      5           2.8       4.0
 
 ---
 
-## 검증
-
-### HTTP 로그 KQL 확인
-
-🟢 **실행** (5–10분 대기 후)
-
-```bash
-LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
-az monitor log-analytics query -w $LAW_CID --analytics-query \
-  'AppServiceHTTPLogs | where TimeGenerated > ago(30m)
-   | summarize hits=count() by CsUriStem, ScStatus | order by hits desc' -o table
-```
-
-📋 **예상 출력**
-
-```
-CsUriStem      ScStatus    TableName      Hits
--------------  ----------  -------------  ------
-/api/info      200         PrimaryResult  30
-/              200         PrimaryResult  5
-```
-
-### App Insights 텔레메트리 확인
-
-🟢 **실행** (트래픽 발생 후 수 분 대기)
-
-```bash
-LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
-APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
-az monitor log-analytics query -w $LAW_CID --analytics-query \
-  "AppRequests
-   | where TimeGenerated > ago(15m)
-   | where _ResourceId =~ '$APPI_ID'
-   | summarize count=sum(ItemCount) by name=Name" -o table
-```
-
-📋 **예상 출력**
-
-```
-name                count    TableName
-------------------  -------  -------------
-GET /api/info       20       PrimaryResult
-```
-
-`AppServiceHTTPLogs`에 데이터가 조회되고 `AppRequests` 테이블에 `/api/info` 항목이 확인되면 08 모듈이 완료된 것입니다.
-
----
-
 ## 트러블슈팅
 
 ### (1) KQL 결과가 0건

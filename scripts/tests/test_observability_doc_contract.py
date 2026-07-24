@@ -83,12 +83,12 @@ def test_app_insights_requests_use_workspace_query_in_cloud_shell():
     assert observability_main.count("AppRequests") >= 2
     assert observability_main.count(
         "az monitor log-analytics query -w $LAW_CID"
-    ) >= 4
+    ) >= 2
     assert observability_main.count(
         "APPI_ID=$(az monitor app-insights component show"
-    ) >= 2
+    ) >= 1
     assert "_ResourceId =~ '$APPI_ID'" in observability_main
-    assert "summarize count=sum(ItemCount) by name=Name" in observability_main
+    assert "requests=sum(ItemCount)" in observability_main
 
 
 def test_cloud_shell_msi_error_explains_workspace_query_path():
@@ -170,3 +170,10 @@ def test_step_four_uses_application_insights_investigation_images():
     for filename, alt_text in image_references.items():
         assert f"{alt_text}(images/{filename})" in OBSERVABILITY
         assert (ROOT / "docs/images" / filename).is_file()
+
+
+def test_redundant_validation_section_is_removed():
+    assert "## 검증" not in OBSERVABILITY
+    assert "### HTTP 로그 KQL 확인" not in OBSERVABILITY
+    assert "### App Insights 텔레메트리 확인" not in OBSERVABILITY
+    assert "## 트러블슈팅" in OBSERVABILITY
