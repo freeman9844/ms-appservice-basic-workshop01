@@ -169,6 +169,7 @@ Web App 이름(`$APP`)은 `azurewebsites.net` 도메인에서 **전 세계적으
 `The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생하면 새 난수를 생성하여 변수 전체를 재정의하고 명령을 재실행합니다.
 
 ```bash
+# 새 SUFFIX를 선택하면 이 리소스 그룹 이름도 다시 만들어야 하므로, 기존 그룹을 재사용하지 않고 새 이름으로 재생성합니다.
 SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
@@ -189,6 +190,7 @@ az appservice list-locations --linux-workers-enabled --sku P0V4 -o table
 목록에 **Korea Central**이 없거나 `P0V4` 생성이 실패하면, 출력에 표시된 지원 리전을 선택하고 새로운 `SUFFIX`로 리소스 이름을 다시 정의한 뒤 1단계를 재실행합니다.
 
 ```bash
+# 새 SUFFIX를 쓰면 리소스 이름 전체가 바뀌므로, 기존 값들을 다시 계산해 새 리소스 이름으로 맞춥니다.
 SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))
 LOC=eastasia     # 예시: 위 명령에서 확인한 지원 리전
 RG=rg-appsvcworkshop-$SUFFIX
