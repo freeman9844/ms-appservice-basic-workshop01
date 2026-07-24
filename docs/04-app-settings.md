@@ -134,40 +134,6 @@ WELCOME_MESSAGE                 안녕하세요, App Service 워크숍!     Fals
 
 ---
 
-## 검증
-
-🟢 **실행**
-
-```bash
-# 변경된 메시지와 재시작된 프로세스 시각을 최종 확인합니다.
-curl -s $APP_URL/api/info | jq '{message, started_at}'
-az webapp config appsettings list -g $RG -n $APP -o table
-```
-
-📋 **예상 출력 — `curl`**
-
-```json
-{
-  "message": "안녕하세요, App Service 워크숍!",
-  "started_at": "2026-07-08T01:36:07+00:00"
-}
-```
-
-📋 **예상 출력 — `appsettings list`**
-
-```
-Name                            Value                               SlotSetting
-------------------------------  ----------------------------------  -----------
-SCM_DO_BUILD_DURING_DEPLOYMENT  true                                False
-WELCOME_MESSAGE                 안녕하세요, App Service 워크숍!     False
-```
-
-`message`가 설정한 값으로 표시되고, `started_at`이 1단계 기록값과 달라졌다면 앱 설정 변경으로 인한 재시작이 확인된 것입니다.
-
-🖼️ **예상 화면** — 브라우저에서 `$APP_URL`을 새로고침하면 홈 화면에 새 메시지가 표시됩니다.
-
----
-
 ## 트러블슈팅
 
 ### (1) 메시지가 반영되지 않음

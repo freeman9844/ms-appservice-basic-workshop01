@@ -42,3 +42,10 @@ def test_instructional_bash_blocks_have_purpose_comments(module_name):
     assert not uncommented, (
         f"{module_name} has Bash blocks without purpose comments: {uncommented}"
     )
+
+
+@pytest.mark.parametrize("module_name", MODULES)
+def test_modules_do_not_have_standalone_validation_sections(module_name):
+    document = (ROOT / "docs" / module_name).read_text(encoding="utf-8")
+
+    assert "\n## 검증\n" not in document

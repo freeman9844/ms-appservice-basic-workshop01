@@ -161,23 +161,6 @@ https://app-appsvcworkshop-XXXXX.azurewebsites.net
 
 ---
 
-## 검증
-
-🟢 **실행**
-
-```bash
-# Web App의 현재 실행 상태를 확인합니다.
-az webapp show -g $RG -n $APP --query state -o tsv
-```
-
-📋 **예상 출력**
-
-```text
-Running
-```
-
----
-
 ## 트러블슈팅
 
 ### (1) 앱 이름 전역 중복 오류

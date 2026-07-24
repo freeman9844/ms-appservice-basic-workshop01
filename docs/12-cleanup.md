@@ -123,35 +123,6 @@ rm -f $HOME/go/bin/hey
 
 ---
 
-## 검증
-
-🟢 **실행** (수 분 후)
-
-```bash
-# Azure 리소스와 Entra 앱 등록이 남아 있지 않은지 최종 확인합니다.
-az group exists -n $RG
-az ad app list --display-name "auth-appsvcworkshop-$SUFFIX" -o table
-```
-
-📋 **예상 출력 — RG 삭제 완료 시**
-
-```
-false
-```
-
-📋 **예상 출력 — Entra 앱 등록 삭제 완료 시**
-
-```
-DisplayName    Id    AppId
------------    --    -----
-```
-
-`az group exists`가 `false`를 반환하면 리소스 그룹 정리가 완료된 것입니다.
-
-🖼️ **예상 화면** — Azure Portal → **"리소스 그룹"** 메뉴에서 `rg-appsvcworkshop-<SUFFIX>` 이름의 그룹이 목록에 없으면 삭제 완료입니다.
-
----
-
 ## 트러블슈팅
 
 ### (1) RG 삭제 지연 — `az group exists`가 계속 `true` 반환

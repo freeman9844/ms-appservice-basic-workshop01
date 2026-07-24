@@ -195,49 +195,6 @@ v1
 
 ---
 
-## 검증
-
-### 스테이징 슬롯 확인
-
-🟢 **실행**
-
-```bash
-# staging 슬롯에 v2가 배포되어 있는지 확인합니다.
-curl -s $STG_URL/api/info | jq '{version, slot}'
-```
-
-📋 **예상 출력**
-
-```json
-{
-  "version": "v2",
-  "slot": "staging"
-}
-```
-
-### 스왑·롤백 최종 상태 확인
-
-🟢 **실행**
-
-```bash
-# 롤백 후 production=v1, staging=v2 상태인지 최종 확인합니다.
-curl -s $APP_URL/api/info | jq -r .version    # v1 — 롤백 후 production
-curl -s $STG_URL/api/info | jq -r .version    # v2 — staging
-```
-
-📋 **예상 출력**
-
-```
-v1
-v2
-```
-
-최종 상태(production = v1, staging = v2)가 확인되면 05 모듈이 완료된 것입니다.
-
-🖼️ **예상 화면** — 브라우저에서 `$APP_URL`(파랑 v1)과 `$STG_URL`(초록 v2)을 각각 열어 색상을 확인합니다.
-
----
-
 ## 개념 정리
 
 | 개념 | 설명 |

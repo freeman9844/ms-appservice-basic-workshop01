@@ -80,32 +80,6 @@ cd ms-appservice-basic-workshop01
 
 ---
 
-## 검증
-
-아래 명령으로 구독 설정과 리포 클론 결과를 최종 확인합니다.
-
-🟢 **실행**
-
-```bash
-# 구독과 리포지토리 준비 상태를 최종 확인합니다.
-az account show -o table
-ls app/
-```
-
-📋 **예상 출력**
-
-```text
-Name                  CloudName    SubscriptionId                        State    IsDefault
---------------------  -----------  ------------------------------------  -------  -----------
-<구독 이름>            AzureCloud   xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  Enabled  True
-
-app.py  ...
-```
-
-`az account show` 출력에 구독 정보가 표시되고 `ls app/`에 `app.py`가 존재하면 사전 준비가 완료된 것입니다.
-
----
-
 ## 트러블슈팅
 
 ### (1) 확장 설치 실패

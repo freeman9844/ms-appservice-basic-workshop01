@@ -215,33 +215,6 @@ GET /api/info ... 200
 
 ---
 
-## 검증
-
-🟢 **실행**
-
-```bash
-# 배포 결과와 현재 인스턴스 정보를 최종 확인합니다.
-curl -s $APP_URL/api/info | jq
-```
-
-📋 **예상 출력**
-
-```json
-{
-  "color": "#2563eb",
-  "instance": "<instance-id>",
-  "message": "App Service 워크숍에 오신 것을 환영합니다",
-  "python": "3.12.x",
-  "slot": "production",
-  "started_at": "<UTC 시작 시각>",
-  "version": "v1"
-}
-```
-
-`version`이 `v1`, `slot`이 `production`으로 확인되면 배포가 완료된 것입니다. `instance` 값은 이후 **슬롯 스왑**, **스케일아웃**, **트래픽 분산** 모듈에서 핵심 관찰 도구로 활용됩니다.
-
----
-
 ## 트러블슈팅
 
 ### (1) 배포 빌드 실패
