@@ -1,6 +1,6 @@
-# 09. (선택) Prewarmed A/B 실험
+# 09. (선택) Automatic Scaling · Prewarmed A/B 실험
 
-> 🔬 **선택 심화 모듈** — 기본 [07. 자동 스케일](07-autoscale.md)을 완료한 뒤 수행하는 것을 권장합니다. 이 모듈을 건너뛰어도 08 모듈을 진행할 수 있습니다.
+> 🔬 **선택 심화 모듈** — [07. Autoscale](07-autoscale.md)을 완료한 뒤 수행하는 것을 권장합니다. 이 모듈은 07의 규칙 기반 Autoscale을 제거하고 App Service Automatic Scaling으로 전환한 뒤 Prewarmed 0/1을 비교합니다.
 
 > 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
 
@@ -8,9 +8,9 @@
 
 ## 목표
 
-이 선택 심화 모듈에서는 기본 07에서 활성화한 Azure App Service **Automatic Scaling**과 `hey`, 두 Python observer를 사용하여 새 instance가 **언제 시작되고 언제 실제 응답에 처음 투입되는지**를 관찰합니다. 단일 실행의 승패를 가르기보다 `Prewarmed=0`과 `Prewarmed=1`에서 보이는 외부 증거를 기록하고 해석합니다.
+이 선택 심화 모듈에서는 07의 Azure Monitor Autoscale을 **Automatic Scaling**으로 전환하고, `hey`와 두 Python observer를 사용하여 새 instance가 **언제 시작되고 언제 실제 응답에 처음 투입되는지**를 관찰합니다. 단일 실행의 승패를 가르기보다 `Prewarmed=0`과 `Prewarmed=1`에서 보이는 외부 증거를 기록하고 해석합니다.
 
-- 기본 07의 Automatic Scaling 상태(Maximum burst 5, Always ready 1, Prewarmed 1)를 확인합니다.
+- 07의 Autoscale 설정을 제거하고 Automatic Scaling(Maximum burst 5, Always ready 1, Prewarmed 1)을 활성화합니다.
 - `STARTUP_DELAY_SECONDS=20`으로 새 프로세스의 시작 준비 시간을 눈에 보이게 만듭니다.
 - `/api/info`의 `started_at`과 새 instance의 최초 관찰 시각으로 `first_response_age`를 계산합니다.
 - `Prewarmed=0`과 `Prewarmed=1`의 인스턴스별 시작·투입 타임라인을 비교하되, 한 번의 실행에서 어느 쪽이 반드시 더 빠르다고 판정하지 않습니다.
@@ -32,7 +32,7 @@ REPO_DIR="$HOME/ms-appservice-basic-workshop01"
 
 ## 0단계 — (선택) 변수 재설정
 
-> ⏭️ **06 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
+> ⏭️ **07 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
 > 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
 > `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
 > 이후 헬퍼는 기본 클론 경로 `~/ms-appservice-basic-workshop01`를 기준으로 동작합니다. 새 Cloud Shell은 현재 디렉터리를 보장하지 않으므로, 스크립트 경로를 고정해 둡니다.
@@ -48,7 +48,10 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
+AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
+APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 echo "APP_URL=$APP_URL"
 ```
 
@@ -60,9 +63,18 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 
 ---
 
-## 👁️ Always ready, Prewarmed, Maximum burst 상세 이해
+## 👁️ Autoscale과 Automatic Scaling
 
-`Always ready`, `Prewarmed`, `Maximum burst`는 CPU 임계값 같은 규칙을 직접 정의하는 Azure Monitor Autoscale이 아니라, HTTP 트래픽에 따라 플랫폼이 확장하는 **Automatic Scaling**에서 사용하는 설정입니다.
+Microsoft Learn은 한 App Service Plan에 **Autoscale과 Automatic Scaling 중 하나만 활성화**하도록 안내합니다.
+
+| 항목 | Azure Monitor Autoscale | App Service Automatic Scaling |
+|---|---|---|
+| 적용 범위 | App Service Plan 전체 | Plan 활성화 + Web App별 설정 |
+| 트리거 | CPU·메모리·큐·일정 규칙 | HTTP 트래픽을 플랫폼이 판단 |
+| 주요 설정 | capacity, rules, cooldown | Maximum burst, Always ready, Prewarmed |
+| 이 워크숍 | 07 | 09 |
+
+### Always ready, Prewarmed, Maximum burst
 
 | 적용 범위 | 설정 | 역할 | 이 실험의 기준값 |
 |---|---|---|---|
@@ -83,35 +95,79 @@ Always ready를 높이면 트래픽이 적을 때도 유지하는 기본 용량�
 
 ---
 
-## 선행 조건 확인
-
-> 👁️ Automatic Scaling의 개념과 설정 방법은 [07. 자동 스케일](07-autoscale.md)을 참고하세요. 이 심화 실험은 기본 07의 종료 상태인 **Automatic Scaling 활성, Maximum burst 5, Always ready 1, Prewarmed 1**에서 시작합니다.
+## 1단계 — Autoscale 제거 및 Automatic Scaling 활성화
 
 🟢 **실행**
 
 ```bash
-# 리소스 ID와 hey 경로를 복원하고 기본 07의 종료 상태를 확인합니다.
+# 07의 Autoscale을 제거하고 App Service Automatic Scaling으로 전환합니다.
 export PATH=$HOME/go/bin:$PATH
-PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
-APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
-
 if ! command -v hey >/dev/null 2>&1; then
-  echo "hey가 없습니다. 기본 07의 2단계를 먼저 수행하세요." >&2
+  echo "hey가 없습니다. 07의 hey 설치 단계를 먼저 수행하세요." >&2
   false
 fi
 
-az rest --method get \
-  --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
+AUTOSCALE_ID=$(az monitor autoscale list -g "$RG" \
+  --query "[?name=='$AUTOSCALE'].id | [0]" -o tsv)
+if [ -n "$AUTOSCALE_ID" ]; then
+  az monitor autoscale delete --ids "$AUTOSCALE_ID"
+fi &&
 
-az rest --method get \
+az rest --method patch \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+  --output none &&
+
+az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none &&
+
+az webapp config appsettings delete -g "$RG" -n "$APP" \
+  --setting-names STARTUP_DELAY_SECONDS --output none &&
+echo "Automatic Scaling 전환 완료"
+```
+
+> ⚠️ 완료 메시지가 보이지 않으면 A/B 준비로 진행하지 않습니다.
+
+🟢 **실행 — 앱 준비와 전환 상태 확인**
+
+```bash
+for attempt in $(seq 1 18); do
+  if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
+    break
+  fi
+  if [ "$attempt" -eq 18 ]; then
+    echo "Automatic Scaling 전환 후 /health 확인 실패" >&2
+    false
+  fi
+  sleep 5
+done
+
+PLAN_STATE=$(az rest --method get \
+  --uri "${PLAN_ID}?api-version=2024-11-01")
+APP_STATE=$(az rest --method get \
+  --uri "${APP_ID}/config/web?api-version=2024-11-01")
+AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
+  --query "length([?name=='$AUTOSCALE'])" -o tsv)
+
+jq '{automaticScaling:.properties.elasticScaleEnabled,maximumBurst:.properties.maximumElasticWorkerCount}' <<< "$PLAN_STATE"
+jq '{alwaysReady:.properties.minimumElasticInstanceCount,prewarmed:.properties.preWarmedInstanceCount}' <<< "$APP_STATE"
+echo "Autoscale setting count=$AUTOSCALE_COUNT"
+
+if ! jq -e '.properties.elasticScaleEnabled == true and .properties.maximumElasticWorkerCount == 5' \
+    >/dev/null <<< "$PLAN_STATE" ||
+  ! jq -e '.properties.minimumElasticInstanceCount == 1 and .properties.preWarmedInstanceCount == 1' \
+    >/dev/null <<< "$APP_STATE" ||
+  [ "$AUTOSCALE_COUNT" -ne 0 ]; then
+  echo "Automatic Scaling 전환 상태 불일치" >&2
+  false
+fi
 ```
 
 📋 **예상 출력**
 
-```json
+```text
 {
   "automaticScaling": true,
   "maximumBurst": 5
@@ -120,13 +176,16 @@ az rest --method get \
   "alwaysReady": 1,
   "prewarmed": 1
 }
+Autoscale setting count=0
 ```
 
-> ⚠️ 값이 다르면 심화 실험을 시작하지 말고 기본 07의 1단계를 다시 수행하세요.
+🖼️ **예상 화면 — Azure Portal Automatic Scaling 설정**
+
+![Azure Portal Scale out 화면에서 Automatic, Maximum burst 5, Always ready instances 1 확인](images/09-automatic-scaling-portal.png)
 
 ---
 
-## 1단계 — Prewarmed A/B 비교 준비
+## 2단계 — Prewarmed A/B 비교 준비
 
 이번 모듈의 관찰 포인트는 “어느 시험이 더 빨랐는가”가 아니라 **새 instance가 시작된 뒤 실제 응답에 처음 보일 때까지 어떤 타임라인이 관찰되는가**입니다. 먼저 `STARTUP_DELAY_SECONDS=20`으로 새 프로세스의 시작 준비 시간을 키우고, 동일한 burst 부하에서 `Prewarmed=0`과 `Prewarmed=1`의 관찰 결과를 같은 형식으로 기록합니다.
 
@@ -150,7 +209,7 @@ az webapp config appsettings set -g "$RG" -n "$APP" \
 echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 ```
 
-> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 4단계의 **모듈 기본 상태로 복원** 명령을 실행합니다.
+> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 5단계의 **모듈 기본 상태로 복원** 명령을 실행합니다.
 
 🟢 **실행 — 앱 준비 상태 확인**
 
@@ -171,7 +230,7 @@ for attempt in $(seq 1 18); do
   fi
 done
 if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
-  echo "/health 확인 실패: 4단계의 복원 명령을 실행하세요." >&2
+  echo "/health 확인 실패: 5단계의 복원 명령을 실행하세요." >&2
   false
 fi
 ```
@@ -185,7 +244,7 @@ fi
 > 👁️ `InstanceCount`는 시험 시작 전·시험 사이의 단일 인스턴스 기준 상태 확인과 각 시험 중의 capacity 변화 관찰에 사용합니다. 시험 중에는 30초마다 조회해 1분 단위 값을 별도 JSON으로 저장하고, `observe_instances.py`는 실제 응답에 나타난 새 instance의 `started_at`, `first_seen_at`, `first_response_age`를 기록합니다.
 
 
-## 2단계 — 시험 A: Prewarmed=0
+## 3단계 — 시험 A: Prewarmed=0
 
 먼저 `Prewarmed=0`에서 새 instance가 언제 처음 응답에 투입되는지 관찰합니다.
 
@@ -278,16 +337,16 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
 
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 A 실패: 세 결과를 비교하지 말고 4단계의 복원 명령을 실행하세요." >&2
+    echo "시험 A 실패: 세 결과를 비교하지 말고 5단계의 복원 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 A 기준 instance 확인 실패: 4단계의 모듈 기본 상태로 복원 명령을 실행한 뒤 1단계부터 다시 시도하세요." >&2
+  echo "시험 A 기준 instance 확인 실패: 5단계의 모듈 기본 상태로 복원 명령을 실행한 뒤 2단계부터 다시 시도하세요." >&2
   false
 fi
 ```
 
-> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 4단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 1단계부터 다시 시도합니다.
+> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 5단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 2단계부터 다시 시도합니다.
 
 📋 **예상 출력** (2026-07-23 리허설 예시)
 
@@ -312,7 +371,7 @@ observer exit=0, hey exit=0, metric exit=0
 
 ---
 
-## 3단계 — scale-in 게이트 후 시험 B: Prewarmed=1
+## 4단계 — scale-in 게이트 후 시험 B: Prewarmed=1
 
 시험 B는 반드시 시험 A의 부하가 끝나고 새 기준 상태가 다시 확보된 뒤 시작합니다. `Prewarmed=1`로 되돌린 뒤에도 별도의 prime 부하나 `InstanceCount>=2` 버퍼 게이트는 두지 않고, 같은 burst에서 새 instance의 최초 응답 나이를 다시 관찰합니다.
 
@@ -367,7 +426,7 @@ az rest --method get \
 > 3. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 부하 조건은 동일하게 유지하고 출력 파일만 `$AB_DIR/hey-burst-1.out`을 사용합니다.
 > 4. `METRIC_PID=$!`와 `HEY_PID=$!`에 Trial B의 백그라운드 프로세스 PID를 저장하여 뒤의 `wait`가 각 완료와 종료 상태를 정확히 확인하도록 합니다.
 > 5. `observe_instances.py`는 기준 instance를 제외하고 `--concurrency 30`, `--request-timeout 5` 조건으로 새 instance를 관찰합니다. 결과는 Trial B 전용 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
-> 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 4단계 복원 명령을 실행합니다.
+> 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 5단계 복원 명령을 실행합니다.
 
 ```bash
 # 시험 B에 시험 A와 동일한 부하와 관찰 조건을 적용합니다.
@@ -405,11 +464,11 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
 
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 B 실패: 세 결과를 비교하지 말고 4단계의 복원 명령을 실행하세요." >&2
+    echo "시험 B 실패: 세 결과를 비교하지 말고 5단계의 복원 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 B 기준 instance 확인 실패: 4단계의 복원 명령을 실행한 뒤 결과를 해석하지 말고 1단계부터 다시 시도하세요." >&2
+  echo "시험 B 기준 instance 확인 실패: 5단계의 복원 명령을 실행한 뒤 결과를 해석하지 말고 2단계부터 다시 시도하세요." >&2
   false
 fi
 ```
@@ -439,7 +498,7 @@ observer exit=0, hey exit=0, metric exit=0
 
 ---
 
-## 4단계 — 기본 상태 복원 및 결과 해석
+## 5단계 — 기본 상태 복원 및 결과 해석
 
 두 시험 모두에서 새 instance가 관찰되었다면, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
 
@@ -517,17 +576,25 @@ then
   echo "앱 설정 조회 실패" >&2
   VERIFY_STATUS=1
 fi
+if ! AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
+  --query "length([?name=='$AUTOSCALE'])" -o tsv)
+then
+  echo "Autoscale 설정 조회 실패" >&2
+  VERIFY_STATUS=1
+fi
 
 if [ "$VERIFY_STATUS" -eq 0 ]; then
   jq '{automaticScaling:.properties.elasticScaleEnabled,maximumBurst:.properties.maximumElasticWorkerCount}' <<< "$PLAN_STATE"
   jq '{alwaysReady:.properties.minimumElasticInstanceCount,prewarmed:.properties.preWarmedInstanceCount}' <<< "$APP_STATE"
   echo "STARTUP_DELAY_SECONDS count=$STARTUP_DELAY_COUNT"
+  echo "Autoscale setting count=$AUTOSCALE_COUNT"
 
   if ! jq -e '.properties.elasticScaleEnabled == true and .properties.maximumElasticWorkerCount == 5' \
     >/dev/null <<< "$PLAN_STATE" ||
     ! jq -e '.properties.minimumElasticInstanceCount == 1 and .properties.preWarmedInstanceCount == 1' \
       >/dev/null <<< "$APP_STATE" ||
-    [ "$STARTUP_DELAY_COUNT" != "0" ]
+    [ "$STARTUP_DELAY_COUNT" != "0" ] ||
+    [ "$AUTOSCALE_COUNT" != "0" ]
   then
     VERIFY_STATUS=1
   fi
@@ -568,6 +635,7 @@ Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료
   "prewarmed": 1
 }
 STARTUP_DELAY_SECONDS count=0
+Autoscale setting count=0
 {"status":"ok"}
 ```
 
@@ -698,7 +766,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 - 새 Cloud Shell에서 시작했다면 위 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인한 뒤, 0단계에서 `SUFFIX`와 Azure 리소스 변수만 다시 맞춥니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
-- 4단계의 복원 명령을 실행한 뒤, 3단계의 단일 인스턴스 조회 명령으로 최신 행의 `count`가 `1`인지 다시 확인하고 1단계부터 재실행합니다.
+- 5단계의 복원 명령을 실행한 뒤, 4단계의 단일 인스턴스 조회 명령으로 최신 행의 `count`가 `1`인지 다시 확인하고 2단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
 - Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
@@ -716,7 +784,7 @@ az monitor metrics list \
 
 ### (2) 단일 인스턴스로 축소되지 않음
 
-시험 A 뒤 3단계의 단일 인스턴스 조회에서 최신 행의 `count`가 계속 2 이상이면 시험 B를 실행하지 말고, 4단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 1단계부터 재실행하세요.
+시험 A 뒤 4단계의 단일 인스턴스 조회에서 최신 행의 `count`가 계속 2 이상이면 시험 B를 실행하지 말고, 5단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
 
 ```bash
 for attempt in $(seq 1 5); do
@@ -740,7 +808,7 @@ Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Pla
 
 ### (4) 복원 명령이 실패함
 
-4단계의 복원 블록이 실패하면 다음 모듈로 넘어가지 말고, 아래 복구 명령을 다시 실행합니다.
+5단계의 복원 블록이 실패하면 다음 모듈로 넘어가지 말고, 아래 복구 명령을 다시 실행합니다.
 
 ```bash
 # 새 Cloud Shell에서도 복구할 수 있도록 변수와 리소스 ID를 다시 조회합니다.
@@ -748,10 +816,24 @@ SUFFIX=<이전에_메모한_값>
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
+AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
+PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 
-# 두 복구 명령은 서로 독립적으로 실행합니다.
+# 남아 있는 Autoscale 설정을 제거하고 Automatic Scaling을 다시 활성화합니다.
+AUTOSCALE_ID=$(az monitor autoscale list -g "$RG" \
+  --query "[?name=='$AUTOSCALE'].id | [0]" -o tsv)
+if [ -n "$AUTOSCALE_ID" ]; then
+  az monitor autoscale delete --ids "$AUTOSCALE_ID"
+fi
+
+az rest --method patch \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+  --output none
+
+# Web App 설정 복원과 시작 지연 삭제는 서로 독립적으로 실행합니다.
 az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
@@ -760,7 +842,7 @@ az rest --method patch \
 az webapp config appsettings delete -g "$RG" -n "$APP" \
   --setting-names STARTUP_DELAY_SECONDS --output none
 
-# 복구 후 4단계의 "복원 상태 확인" 블록을 다시 실행합니다.
+# 복구 후 5단계의 "복원 상태 확인" 블록을 다시 실행합니다.
 ```
 
 ### (5) hey 설치 실패
@@ -780,8 +862,8 @@ command -v hey
 ['--minimum-elastic-instance-count', '--prewarmed-instance-count'] are only supported for elastic premium V2/V3 SKUs
 ```
 
-P0v4가 지원되지 않는 것이 아니라 Azure CLI의 SKU 검증 로직이 Premium v4를 아직 포함하지 않아 발생하는 오류입니다. 기본 07의 1단계 `az rest` 명령을 사용하고, 기존 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령은 실행하지 않습니다.
+P0v4가 지원되지 않는 것이 아니라 Azure CLI의 SKU 검증 로직이 Premium v4를 아직 포함하지 않아 발생하는 오류입니다. 이 모듈 1단계의 `az rest` 명령을 사용하고, 기존 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령은 실행하지 않습니다.
 
 ---
 
-권장 이전 모듈: [07. 자동 스케일](07-autoscale.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)
+권장 이전 모듈: [07. Autoscale(CPU 규칙 기반 확장)](07-autoscale.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)
