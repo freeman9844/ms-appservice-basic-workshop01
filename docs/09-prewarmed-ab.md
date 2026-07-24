@@ -369,7 +369,7 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   # hey는 동일한 Trial A burst 부하를 독립 백그라운드 작업으로 보내고 요약 출력은 전용 .out 파일에 남깁니다.
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
     > "$AB_DIR/hey-burst-0.out" &
-  # HEY_PID는 observer 실패 시 hey만 정리하거나, 나중에 hey exit code를 정확히 wait하기 위한 PID입니다.
+  # HEY_PID는 observer 실패 시 hey·metric observer를 각 PID로 정리할 때 hey 프로세스를 지정하고, 나중에 hey exit code를 정확히 wait하기 위한 PID입니다.
   HEY_PID=$!
 
   # instance observer는 foreground에서 새 instance의 started_at/first_seen_at을 수집하고, 위 두 백그라운드 작업과 동시에 독립적으로 진행됩니다.
@@ -538,7 +538,7 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   # hey는 Trial B의 동일한 burst 부하를 독립 백그라운드 작업으로 보내고 출력은 별도 .out 파일에 남깁니다.
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
     > "$AB_DIR/hey-burst-1.out" &
-  # HEY_PID는 hey만 정리하거나 hey exit code를 정확히 wait하기 위한 PID입니다.
+  # HEY_PID는 observer 실패 시 hey·metric observer를 각 PID로 정리할 때 hey 프로세스를 지정하고, 나중에 hey exit code를 정확히 wait하기 위한 PID입니다.
   HEY_PID=$!
 
   # instance observer는 foreground에서 새 instance 타임라인을 수집하며 hey·metric observer와 동시에 독립적으로 실행됩니다.
