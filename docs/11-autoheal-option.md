@@ -158,7 +158,8 @@ az resource update -g $RG --resource-type "Microsoft.Web/sites/config" \
 🟢 **실행**
 
 ```bash
-# 90초 대기(minProcessExecutionTime) 후 — 변경 전 시작 시각 기록
+# 90초 실제 대기(minProcessExecutionTime 창 회피) 후 변경 전 시작 시각 기록
+sleep 90
 curl -s $APP_URL/api/info | jq -r .started_at
 ```
 
@@ -205,7 +206,8 @@ Auto-heal이 트리거된 후 워커 프로세스가 재활용되기까지 60–
 🟢 **실행**
 
 ```bash
-# 60–90초 후
+# 90초 실제 대기 — 트리거 감지 후 Recycle 실행까지 60–90초 소요
+sleep 90
 curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로세스 재활용됨
 ```
 
@@ -240,10 +242,11 @@ curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로�
 
 ### 프로세스 재활용 확인
 
-🟢 **실행** (4단계 트리거 후 60–90초 대기)
+🟢 **실행** (4단계 트리거 후 90초 실제 대기 — 5단계와 동일)
 
 ```bash
 # started_at 변경으로 프로세스 재활용 여부를 최종 확인합니다.
+sleep 90
 curl -s $APP_URL/api/info | jq -r .started_at
 ```
 
@@ -273,6 +276,7 @@ time curl -s "$APP_URL/slow?sec=5" > /dev/null
 
 - 인스턴스가 여러 개이면 요청이 분산됩니다. `az webapp list-instances`로 인스턴스 수를 확인하고 1개로 줄어들 때까지 기다립니다.
 - 60–90초 대기가 부족했을 수 있습니다. 추가로 60초 더 기다린 후 재확인합니다.
+- **`minProcessExecutionTime` 창 안에서 트리거되었을 수 있습니다.** 2단계 규칙 적용은 사이트 구성 변경이라 앱이 재시작되며, 재시작 후 1분 이내에는 트리거가 충족돼도 Recycle이 억제됩니다. 3단계의 `sleep 90` 없이 바로 4단계를 실행했다면 이 경우입니다 — 4단계(slow 요청 6회)부터 다시 실행하고 90초 대기 후 재확인합니다.
 
 ### (2) `/api/info` 또는 `/slow` 엔드포인트 403 응답
 
