@@ -48,6 +48,7 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
+AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
 PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
@@ -106,16 +107,12 @@ if ! command -v hey >/dev/null 2>&1; then
   false
 fi
 
-if ! (
-  set -o pipefail
-  az monitor autoscale list -g "$RG" -o json |
-    jq -r --arg plan "$PLAN_ID" \
-      '.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase)) | .id' |
-    xargs -r -n 1 az monitor autoscale delete --ids
-); then
+if [ "$(az monitor autoscale list -g "$RG" --query "length([?name=='$AUTOSCALE'])" -o tsv)" != "0" ] &&
+  ! az monitor autoscale delete -g "$RG" -n "$AUTOSCALE"; then
   echo "Plan의 Autoscale 설정 제거 실패" >&2
   false
 else
+  # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (6) 참고).
   az rest --method patch \
     --uri "${PLAN_ID}?api-version=2024-11-01" \
     --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
@@ -148,25 +145,22 @@ for attempt in $(seq 1 18); do
   sleep 5
 done
 
-PLAN_STATE=$(az rest --method get \
-  --uri "${PLAN_ID}?api-version=2024-11-01")
-APP_STATE=$(az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01")
-AUTOSCALE_COUNT=$(
-  set -o pipefail
-  az monitor autoscale list -g "$RG" -o json |
-    jq -r --arg plan "$PLAN_ID" \
-      '[.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase))] | length'
-)
+# Plan 상태만 az rest로 조회합니다. CLI 조회는 Premium v4의 elastic 속성을 반환하지 않습니다.
+PLAN_SCALE=$(az rest --method get \
+  --uri "${PLAN_ID}?api-version=2024-11-01" \
+  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}" -o json)
+APP_SCALE=$(az webapp show -g "$RG" -n "$APP" \
+  --query "siteConfig.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" -o json)
+AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
+  --query "length([?name=='$AUTOSCALE'])" -o tsv)
 
-jq '{automaticScaling:.properties.elasticScaleEnabled,maximumBurst:.properties.maximumElasticWorkerCount}' <<< "$PLAN_STATE"
-jq '{alwaysReady:.properties.minimumElasticInstanceCount,prewarmed:.properties.preWarmedInstanceCount}' <<< "$APP_STATE"
+printf '%s\n%s\n' "$PLAN_SCALE" "$APP_SCALE"
 echo "Autoscale setting count=$AUTOSCALE_COUNT"
 
-if ! jq -e '.properties.elasticScaleEnabled == true and .properties.maximumElasticWorkerCount == 5' \
-    >/dev/null <<< "$PLAN_STATE" ||
-  ! jq -e '.properties.minimumElasticInstanceCount == 1 and .properties.preWarmedInstanceCount == 1' \
-    >/dev/null <<< "$APP_STATE" ||
+if ! jq -e '.automaticScaling == true and .maximumBurst == 5' \
+    >/dev/null <<< "$PLAN_SCALE" ||
+  ! jq -e '.alwaysReady == 1 and .prewarmed == 1' \
+    >/dev/null <<< "$APP_SCALE" ||
   [ "$AUTOSCALE_COUNT" != "0" ]; then
   echo "Automatic Scaling 전환 상태 불일치" >&2
   false
@@ -266,9 +260,8 @@ az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
   --output none &&
-az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+az webapp show -g "$RG" -n "$APP" \
+  --query "siteConfig.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
 ```
 
 📋 **예상 출력**
@@ -289,25 +282,18 @@ az rest --method get \
 GATE_START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 SINGLE_INSTANCE_READY=0
 for attempt in $(seq 1 30); do
-  INSTANCE_COUNTS=$(az monitor metrics list \
+  LAST_TWO_COUNTS=$(az monitor metrics list \
     --resource "$APP_ID" \
     --metric InstanceCount \
     --interval PT1M \
     --aggregation Average \
     --start-time "$GATE_START_TIME" \
-    --query "value[0].timeseries[0].data[?average != null].average" \
-    -o tsv)
-  FRESH_SAMPLE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
-    awk 'NF { count++ } END { print count + 0 }')
-  LATEST_INSTANCE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
-    awk 'NF { latest=$1 } END { print latest }')
-  printf 'Trial A single-instance gate %02d/30 samples=%s latest=%s\n' \
-    "$attempt" "$FRESH_SAMPLE_COUNT" "${LATEST_INSTANCE_COUNT:-pending}"
+    --query "(value[0].timeseries[0].data[?average != null].average)[-2:]" \
+    -o tsv | xargs)
+  printf 'Trial A single-instance gate %02d/30 counts=[%s]\n' \
+    "$attempt" "${LAST_TWO_COUNTS:-pending}"
 
-  if [ "$FRESH_SAMPLE_COUNT" -ge 2 ] &&
-    printf '%s\n' "$INSTANCE_COUNTS" | tail -n 2 |
-      awk 'NF { count++; if (($1 + 0) != 1) bad=1 }
-           END { exit !(count == 2 && !bad) }'; then
+  if [ "$LAST_TWO_COUNTS" = "1.0 1.0" ]; then
     SINGLE_INSTANCE_READY=1
     break
   fi
@@ -325,9 +311,9 @@ fi
 📋 **예상 출력**
 
 ```text
-Trial A single-instance gate 01/30 samples=0 latest=pending
-Trial A single-instance gate 03/30 samples=1 latest=1.0
-Trial A single-instance gate 05/30 samples=2 latest=1.0
+Trial A single-instance gate 01/30 counts=[pending]
+Trial A single-instance gate 03/30 counts=[1.0]
+Trial A single-instance gate 05/30 counts=[1.0 1.0]
 ```
 
 🟢 **실행 — 시험 A 관찰**
@@ -424,25 +410,18 @@ observer exit=0, hey exit=0, metric exit=0
 GATE_START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 SINGLE_INSTANCE_READY=0
 for attempt in $(seq 1 30); do
-  INSTANCE_COUNTS=$(az monitor metrics list \
+  LAST_TWO_COUNTS=$(az monitor metrics list \
     --resource "$APP_ID" \
     --metric InstanceCount \
     --interval PT1M \
     --aggregation Average \
     --start-time "$GATE_START_TIME" \
-    --query "value[0].timeseries[0].data[?average != null].average" \
-    -o tsv)
-  FRESH_SAMPLE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
-    awk 'NF { count++ } END { print count + 0 }')
-  LATEST_INSTANCE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
-    awk 'NF { latest=$1 } END { print latest }')
-  printf 'Trial B single-instance gate %02d/30 samples=%s latest=%s\n' \
-    "$attempt" "$FRESH_SAMPLE_COUNT" "${LATEST_INSTANCE_COUNT:-pending}"
+    --query "(value[0].timeseries[0].data[?average != null].average)[-2:]" \
+    -o tsv | xargs)
+  printf 'Trial B single-instance gate %02d/30 counts=[%s]\n' \
+    "$attempt" "${LAST_TWO_COUNTS:-pending}"
 
-  if [ "$FRESH_SAMPLE_COUNT" -ge 2 ] &&
-    printf '%s\n' "$INSTANCE_COUNTS" | tail -n 2 |
-      awk 'NF { count++; if (($1 + 0) != 1) bad=1 }
-           END { exit !(count == 2 && !bad) }'; then
+  if [ "$LAST_TWO_COUNTS" = "1.0 1.0" ]; then
     SINGLE_INSTANCE_READY=1
     break
   fi
@@ -460,9 +439,9 @@ fi
 📋 **예상 출력**
 
 ```text
-Trial B single-instance gate 01/30 samples=0 latest=pending
+Trial B single-instance gate 01/30 counts=[pending]
 ...
-Trial B single-instance gate 09/30 samples=2 latest=1.0
+Trial B single-instance gate 09/30 counts=[1.0 1.0]
 ```
 
 > 👁️ 별도의 prime 부하나 `InstanceCount>=2` 확인은 하지 않습니다.
@@ -477,9 +456,8 @@ az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
   --output none &&
-az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+az webapp show -g "$RG" -n "$APP" \
+  --query "siteConfig.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
 ```
 
 📋 **예상 출력**
@@ -630,14 +608,16 @@ if ! APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv); then
 fi
 
 if [ "$VERIFY_STATUS" -eq 0 ]; then
-  if ! PLAN_STATE=$(az rest --method get \
-    --uri "${PLAN_ID}?api-version=2024-11-01" -o json)
+  # Plan 상태만 az rest로 조회합니다. CLI 조회는 Premium v4의 elastic 속성을 반환하지 않습니다.
+  if ! PLAN_SCALE=$(az rest --method get \
+    --uri "${PLAN_ID}?api-version=2024-11-01" \
+    --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}" -o json)
   then
     echo "Plan 상태 조회 실패" >&2
     VERIFY_STATUS=1
   fi
-  if ! APP_STATE=$(az rest --method get \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" -o json)
+  if ! APP_SCALE=$(az webapp show -g "$RG" -n "$APP" \
+    --query "siteConfig.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" -o json)
   then
     echo "Web App 상태 조회 실패" >&2
     VERIFY_STATUS=1
@@ -650,27 +630,22 @@ then
   echo "앱 설정 조회 실패" >&2
   VERIFY_STATUS=1
 fi
-if ! AUTOSCALE_COUNT=$(
-  set -o pipefail
-  az monitor autoscale list -g "$RG" -o json |
-    jq -r --arg plan "$PLAN_ID" \
-      '[.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase))] | length'
-)
+if ! AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
+  --query "length([?name=='$AUTOSCALE'])" -o tsv)
 then
   echo "Autoscale 설정 조회 실패" >&2
   VERIFY_STATUS=1
 fi
 
 if [ "$VERIFY_STATUS" -eq 0 ]; then
-  jq '{automaticScaling:.properties.elasticScaleEnabled,maximumBurst:.properties.maximumElasticWorkerCount}' <<< "$PLAN_STATE"
-  jq '{alwaysReady:.properties.minimumElasticInstanceCount,prewarmed:.properties.preWarmedInstanceCount}' <<< "$APP_STATE"
+  printf '%s\n%s\n' "$PLAN_SCALE" "$APP_SCALE"
   echo "STARTUP_DELAY_SECONDS count=$STARTUP_DELAY_COUNT"
   echo "Autoscale setting count=$AUTOSCALE_COUNT"
 
-  if ! jq -e '.properties.elasticScaleEnabled == true and .properties.maximumElasticWorkerCount == 5' \
-    >/dev/null <<< "$PLAN_STATE" ||
-    ! jq -e '.properties.minimumElasticInstanceCount == 1 and .properties.preWarmedInstanceCount == 1' \
-      >/dev/null <<< "$APP_STATE" ||
+  if ! jq -e '.automaticScaling == true and .maximumBurst == 5' \
+    >/dev/null <<< "$PLAN_SCALE" ||
+    ! jq -e '.alwaysReady == 1 and .prewarmed == 1' \
+      >/dev/null <<< "$APP_SCALE" ||
     [ "$STARTUP_DELAY_COUNT" != "0" ] ||
     [ "$AUTOSCALE_COUNT" != "0" ]
   then
@@ -894,21 +869,18 @@ SUFFIX=<이전에_메모한_값>
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
+AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
 PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 
 # 남아 있는 Autoscale 설정을 제거하고 Automatic Scaling을 다시 활성화합니다.
-if ! (
-  set -o pipefail
-  az monitor autoscale list -g "$RG" -o json |
-    jq -r --arg plan "$PLAN_ID" \
-      '.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase)) | .id' |
-    xargs -r -n 1 az monitor autoscale delete --ids
-); then
+if [ "$(az monitor autoscale list -g "$RG" --query "length([?name=='$AUTOSCALE'])" -o tsv)" != "0" ] &&
+  ! az monitor autoscale delete -g "$RG" -n "$AUTOSCALE"; then
   echo "Plan의 Autoscale 설정 제거 실패" >&2
   false
 else
+  # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (6) 참고).
   az rest --method patch \
     --uri "${PLAN_ID}?api-version=2024-11-01" \
     --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
