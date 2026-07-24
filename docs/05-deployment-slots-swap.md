@@ -67,6 +67,7 @@ App Service는 staging을 먼저 워밍업한 뒤 production과 라우팅을 전
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 production과 staging URL을 구성합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -91,6 +92,7 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 🟢 **실행**
 
 ```bash
+# production과 동일한 앱 구성을 가진 staging 배포 슬롯을 생성합니다.
 az webapp deployment slot create -g $RG -n $APP --slot staging --configuration-source $APP
 ```
 
@@ -105,6 +107,8 @@ az webapp deployment slot create -g $RG -n $APP --slot staging --configuration-s
 🟢 **실행**
 
 ```bash
+# 소스 버전을 v2로 바꾸어 배포 패키지를 만든 뒤 로컬 소스는 v1로 복원합니다.
+# v2 패키지를 staging 슬롯에 배포하고 슬롯 응답을 확인합니다.
 cd ~/ms-appservice-basic-workshop01/app
 sed -i 's#^VERSION = "v1"#VERSION = "v2"#' app.py
 grep '^VERSION' app.py   # VERSION = "v2" 확인(치환 검증 — 미치환 방지)
@@ -150,6 +154,7 @@ curl -s $STG_URL/api/info | jq '{version, slot}'
 🟢 **실행**
 
 ```bash
+# staging의 v2를 production으로 스왑하고 두 슬롯의 버전을 확인합니다.
 az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
 curl -s $APP_URL/api/info | jq -r .version    # v2 — 무중단 전환
 curl -s $STG_URL/api/info | jq -r .version    # v1 — 이전 버전이 슬롯에 보존
@@ -197,6 +202,7 @@ v1
 🟢 **실행**
 
 ```bash
+# staging 슬롯에 v2가 배포되어 있는지 확인합니다.
 curl -s $STG_URL/api/info | jq '{version, slot}'
 ```
 
@@ -214,6 +220,7 @@ curl -s $STG_URL/api/info | jq '{version, slot}'
 🟢 **실행**
 
 ```bash
+# 롤백 후 production=v1, staging=v2 상태인지 최종 확인합니다.
 curl -s $APP_URL/api/info | jq -r .version    # v1 — 롤백 후 production
 curl -s $STG_URL/api/info | jq -r .version    # v2 — staging
 ```

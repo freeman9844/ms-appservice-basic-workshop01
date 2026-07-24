@@ -24,6 +24,7 @@
 > `REPO_DIR`는 `scripts/observe_instances.py`의 경로를 고정하기 위해 여기서 항상 정의합니다.
 
 ```bash
+# 관찰 스크립트를 현재 리포지토리의 절대 경로로 실행할 수 있도록 기준 경로를 저장합니다.
 REPO_DIR="$HOME/ms-appservice-basic-workshop01"
 ```
 
@@ -39,6 +40,7 @@ REPO_DIR="$HOME/ms-appservice-basic-workshop01"
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 Web App 및 Plan 리소스 ID를 조회합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -126,6 +128,8 @@ flowchart LR
 🟢 **실행** — App Service Plan과 Web App 리소스 ID를 조회한 뒤 ARM REST API로 Automatic scaling을 설정합니다.
 
 ```bash
+# P0v4 Plan에서 Automatic scaling과 최대 탄력 인스턴스 수를 설정합니다.
+# Web App의 Always-ready 및 Prewarmed 인스턴스 수를 초기화합니다.
 PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
 APP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
 
@@ -145,6 +149,7 @@ echo "Automatic scaling 설정 완료"
 🟢 **실행** — 설정값을 조회합니다.
 
 ```bash
+# Plan과 Web App에 적용된 Automatic scaling 값을 확인합니다.
 az rest --method get \
   --uri "${PLAN_ID}?api-version=2024-11-01" \
   --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
@@ -193,6 +198,7 @@ az rest --method get \
 🟢 **실행**
 
 ```bash
+# 동시 요청 부하를 만들 hey 도구를 설치합니다.
 go install github.com/rakyll/hey@latest
 export PATH=$HOME/go/bin:$PATH
 ```
@@ -200,6 +206,7 @@ export PATH=$HOME/go/bin:$PATH
 설치가 완료되면 실행 가능한지 확인합니다(`hey`는 `--version` 플래그가 없으므로 도움말 출력으로 확인).
 
 ```bash
+# hey가 현재 셸에서 실행 가능한지 확인합니다.
 hey 2>&1 | head -1
 ```
 
@@ -222,6 +229,7 @@ Usage: hey [options...] <url>
 > 👁️ 두 시험의 결과를 저장할 디렉터리와 JSON 파일 경로를 먼저 준비하고, 새 프로세스의 시작 지연을 관찰할 수 있도록 `STARTUP_DELAY_SECONDS=20`을 앱 설정에 추가합니다.
 
 ```bash
+# A/B 결과 파일 경로를 준비하고 앱 시작 지연을 적용합니다.
 AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
 mkdir -p "$AB_DIR"
 NO_PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-0-observations.json"
@@ -241,6 +249,7 @@ echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 > 👁️ 앱 설정 변경으로 프로세스가 재시작될 수 있으므로 `/health`를 최대 18회 확인합니다. 응답 JSON의 `status`가 `ok`일 때만 다음 명령으로 진행합니다.
 
 ```bash
+# 앱 재시작 후 /health가 정상화될 때까지 기다립니다.
 HEALTH_CHECK_STATUS=1
 for attempt in $(seq 1 18); do
   HEALTH_BODY=$(curl -fsS --max-time 10 "$APP_URL/health" 2>/dev/null || true)
@@ -277,6 +286,7 @@ fi
 > 👁️ 시험 A 조건을 만들기 위해 Always-ready는 1로 유지하고 Prewarmed만 0으로 변경합니다. PATCH 직후 같은 설정을 조회하여 `prewarmed=0`이 반영됐는지 확인합니다.
 
 ```bash
+# 시험 A를 위해 Prewarmed 인스턴스를 0으로 설정합니다.
 az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":0}}' \
@@ -300,6 +310,7 @@ az rest --method get \
 > 👁️ 최근 10분의 `InstanceCount` Average 값을 1분 간격으로 조회합니다. 최신 행이 `count=1`이면 이전 확장이 정리된 단일 인스턴스 기준 상태입니다.
 
 ```bash
+# 부하 시작 전 요청을 처리하는 기준 인스턴스 하나를 확인합니다.
 az monitor metrics list \
   --resource "$APP_ID" \
   --metric InstanceCount \
@@ -324,6 +335,7 @@ az monitor metrics list \
 > 6. instance observer가 끝나면 `hey`와 metric observer를 차례로 기다리고 `OBSERVER_STATUS`, `HEY_STATUS`, `METRIC_STATUS`를 확인합니다. 세 exit code가 모두 0일 때만 시험 A를 성공으로 보고 시험 B로 진행합니다.
 
 ```bash
+# 시험 A의 부하, 인스턴스 관찰, InstanceCount 메트릭 수집을 동시에 실행합니다.
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
   echo "Prewarmed=0 기준 instance: $BASELINE_INSTANCE"
@@ -401,6 +413,7 @@ observer exit=0, hey exit=0, metric exit=0
 > 👁️ 시험 A 부하로 늘어난 인스턴스가 scale-in됐는지 다시 확인합니다. 최신 메트릭이 `count=1`이 된 뒤에만 시험 B를 시작합니다.
 
 ```bash
+# 시험 B 전에 scale-in되어 기준 인스턴스 하나로 돌아왔는지 확인합니다.
 az monitor metrics list \
   --resource "$APP_ID" \
   --metric InstanceCount \
@@ -418,6 +431,7 @@ az monitor metrics list \
 > 👁️ 시험 B 조건을 만들기 위해 Prewarmed를 1로 되돌리고 즉시 조회합니다. 출력에서 Always-ready와 Prewarmed가 모두 1인지 확인합니다.
 
 ```bash
+# 시험 B를 위해 Prewarmed 인스턴스를 1로 설정합니다.
 az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
@@ -448,6 +462,7 @@ az rest --method get \
 > 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 6단계 복원 명령을 실행합니다.
 
 ```bash
+# 시험 B에 시험 A와 동일한 부하와 관찰 조건을 적용합니다.
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
   echo "Prewarmed=1 기준 instance: $BASELINE_INSTANCE"
@@ -525,6 +540,7 @@ observer exit=0, hey exit=0, metric exit=0
 > 👁️ `trial_started_at`은 metric observer를 시작한 시험 orchestration 시각입니다. 각 `metric_timestamp`는 Azure Monitor의 1분 집계 구간이고, `instance_count`는 그 구간의 Average 값이며, `observed_at`은 해당 값을 CLI에서 처음 확인한 시각입니다. 이 시각들을 다음 instance 표의 `first_seen_at`과 나란히 비교합니다.
 
 ```bash
+# 두 시험의 InstanceCount 타임라인을 같은 형식으로 출력합니다.
 printf 'trial\ttrial_started_at\tmetric_timestamp\tobserved_at\tinstance_count\n'
 jq -r --arg trial "Prewarmed=0" '
   .trial_started_at as $started |
@@ -555,6 +571,7 @@ Prewarmed=1	2026-07-22T01:12:10Z	2026-07-22T01:13:00Z	2026-07-22T01:13:41Z	3
 > 👁️ 두 JSON 파일을 읽어 Trial A와 B의 instance별 시작·최초 응답 시각을 하나의 TSV 표로 출력합니다. 이 표는 관찰 타임라인을 비교하기 위한 것이며 단일 실행의 속도 승자를 계산하지 않습니다.
 
 ```bash
+# 두 시험에서 관찰된 인스턴스별 시작·최초 응답 시각을 출력합니다.
 jq -r '
   ["trial","instance","started_at","first_seen_at","first_response_age"],
   (.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)])
@@ -588,6 +605,7 @@ Prewarmed=1	5d90b391	2026-07-23T03:30:21Z	2026-07-23T03:30:52Z	31
 > 👁️ 두 JSON의 `first_response_age`를 시험별로 정렬하여 표본 수, 최솟값, 최댓값, 범위를 계산합니다. 최솟값은 준비 하한 근접성, 최댓값과 범위는 긴 지연 꼬리와 관찰값의 일관성을 보는 지표입니다.
 
 ```bash
+# A/B 관찰 범위와 파일 유효성을 요약해 비교 가능한 결과인지 확인합니다.
 jq -s -r '
   ["trial","samples","min_age","max_age","range"],
   (to_entries[] |

@@ -10,6 +10,10 @@ MODULES = [
     "02-environment-setup.md",
     "03-deploy-code.md",
     "04-app-settings.md",
+    "05-deployment-slots-swap.md",
+    "06-traffic-split-canary.md",
+    "07-autoscale.md",
+    "08-observability.md",
 ]
 
 
