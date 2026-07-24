@@ -79,15 +79,30 @@ Easy Auth는 App Service 플랫폼이 앱 앞단에서 인증을 처리하는 �
 🟢 **실행** — `authV2` 확장이 최신 버전인지 확인한 뒤, 테넌트 ID를 조회하고 앱 등록을 생성합니다.
 
 ```bash
+# 2단계에서 Easy Auth v2 명령을 사용하기 위한 CLI 확장을 준비합니다.
 az extension add --name authV2 --upgrade --only-show-errors
+
+# 현재 로그인한 Entra 테넌트 ID를 조회합니다.
 TENANT_ID=$(az account show --query tenantId -o tsv)
 
+# 사용자 로그인을 받을 웹앱의 App Registration을 생성합니다.
+# Easy Auth 콜백 URI와 단일 테넌트 범위를 지정하고,
+# Application(Client) ID를 CLIENT_ID에 저장합니다.
 CLIENT_ID=$(az ad app create --display-name "auth-appsvcworkshop-$SUFFIX" \
   --web-redirect-uris "$APP_URL/.auth/login/aad/callback" \
   --sign-in-audience AzureADMyOrg --query appId -o tsv)
+
+# Easy Auth가 로그인 사용자 클레임을 받을 수 있도록
+# OpenID Connect ID 토큰 발급을 허용합니다.
 az ad app update --id $CLIENT_ID --enable-id-token-issuance true
+
+# Easy Auth가 Entra ID에 애플리케이션 자신을 증명할 Client Secret을 생성합니다.
+# 사용자는 이 시크릿이 아니라 자신의 Entra 계정으로 로그인합니다.
+# Managed Identity를 생성하거나 활성화하는 단계가 아닙니다.
 CLIENT_SECRET=$(az ad app credential reset --id $CLIENT_ID --display-name easyauth \
   --query password -o tsv)
+
+# 12 정리에서 App Registration을 삭제할 수 있도록 Client ID를 출력합니다.
 echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 12 정리에서 필요 — 메모
 ```
 
