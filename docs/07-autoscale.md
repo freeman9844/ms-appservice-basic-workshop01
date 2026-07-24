@@ -182,6 +182,13 @@ echo "Autoscale profile과 CPU 규칙 생성 완료"
 
 > 👁️ scale-out과 scale-in 규칙을 쌍으로 구성해야 최대 또는 최소 인스턴스 수에 도달한 뒤 한 방향으로만 고정되는 상태를 피할 수 있습니다.
 
+> 👁️ CLI로 생성한 Autoscale profile과 CPU 규칙은 **Azure Portal 관리 콘솔**에서도 확인할 수 있습니다.
+> Web App 리소스에서 **Scale out (App Service plan) > Autoscale setting**으로 이동한 뒤 **Refresh**를 선택하면, `Default` profile의 scale-out·scale-in 규칙과 Minimum `1`, Maximum `3`, Default `1` 인스턴스 제한이 표시됩니다.
+
+🖼️ **예상 화면 — Azure Portal Autoscale 설정**
+
+![Azure Portal Autoscale setting 화면에서 CPU scale-out 및 scale-in 규칙과 인스턴스 제한 1·3·1 확인](images/07-autoscale-setting-portal.png)
+
 ---
 
 ## 4단계 — Autoscale 설정값 확인
