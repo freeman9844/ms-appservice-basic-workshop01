@@ -609,8 +609,10 @@ observer exit=0, hey exit=0, metric exit=0
 
 ```bash
 # 리소스 ID를 다시 조회하여 새 Cloud Shell에서도 복원할 수 있게 합니다.
+# RESTORE_STATUS는 Prewarmed 복원과 앱 설정 정리를 각각 시도한 뒤 누적 성공/실패를 한 번에 판단하기 위한 상태값입니다.
 RESTORE_STATUS=0
 if APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv); then
+  # Web App config에서 Always-ready 1, Prewarmed 1을 다시 써서 다음 모듈의 기준 warm 상태를 먼저 복원합니다.
   if ! az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
@@ -625,6 +627,7 @@ else
 fi
 
 # Prewarmed PATCH 결과와 관계없이 인위적인 시작 지연 삭제를 시도합니다.
+# startup delay 정리는 위 PATCH 성공 여부와 독립적으로 실행해, 한쪽이 실패해도 다른 복구 기회를 잃지 않게 합니다.
 if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
   --setting-names STARTUP_DELAY_SECONDS --output none
 then
@@ -647,6 +650,7 @@ fi
 ```bash
 # Automatic Scaling 전체 설정과 시작 지연 삭제를 단언합니다.
 VERIFY_STATUS=0
+# 복원 검증은 현재 리소스 상태를 다시 읽어야 하므로 Plan ID와 Web App ID를 둘 다 fresh 조회합니다.
 if ! PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv); then
   echo "Plan 리소스 ID 조회 실패" >&2
   VERIFY_STATUS=1
@@ -673,6 +677,7 @@ if [ "$VERIFY_STATUS" -eq 0 ]; then
   fi
 fi
 
+# STARTUP_DELAY_SECONDS가 실제로 제거됐는지 app settings 목록에서 세고, Plan 대상 Autoscale이 0개인지 다시 셉니다.
 if ! STARTUP_DELAY_COUNT=$(az webapp config appsettings list -g "$RG" -n "$APP" \
   --query "length([?name=='STARTUP_DELAY_SECONDS'])" -o tsv)
 then
@@ -691,6 +696,7 @@ if [ "$VERIFY_STATUS" -eq 0 ]; then
   echo "STARTUP_DELAY_SECONDS count=$STARTUP_DELAY_COUNT"
   echo "Autoscale setting count=$AUTOSCALE_COUNT"
 
+  # 최종 5/1/1과 startup delay 0개, Plan 대상 Autoscale 0개를 모두 만족해야만 복원이 끝난 것으로 인정합니다.
   if ! jq -e '.automaticScaling == true and .maximumBurst == 5' \
     >/dev/null <<< "$PLAN_SCALE" ||
     ! jq -e '.alwaysReady == 1 and .prewarmed == 1' \
@@ -707,6 +713,7 @@ if [ "$VERIFY_STATUS" -ne 0 ]; then
 fi
 
 if [ "$VERIFY_STATUS" -eq 0 ]; then
+  # 설정값이 맞더라도 재시작 직후일 수 있으므로 마지막으로 /health readiness를 polling해 실제 앱 응답까지 확인합니다.
   for attempt in $(seq 1 18); do
     if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
       break
@@ -747,13 +754,16 @@ Autoscale setting count=0
 
 ```bash
 # 두 시험의 InstanceCount 타임라인을 같은 형식으로 출력합니다.
+# 첫 줄은 두 JSON 결과를 한 표로 이어 붙일 때 공통으로 사용할 탭 구분 헤더입니다.
 printf 'trial\ttrial_started_at\tmetric_timestamp\tobserved_at\tinstance_count\n'
+# Trial A metric JSON에는 시험 이름 필드가 없으므로, 출력 시점에 "Prewarmed=0" 라벨을 붙여 TSV 행으로 만듭니다.
 jq -r --arg trial "Prewarmed=0" '
   .trial_started_at as $started |
   .samples[] |
   [$trial, $started, .metric_timestamp, .observed_at, (.instance_count | tostring)] |
   @tsv
 ' "$NO_PREWARM_METRICS"
+# Trial B도 같은 열 순서로 출력해 두 파일의 InstanceCount 타임라인을 한 표에서 직접 비교할 수 있게 합니다.
 jq -r --arg trial "Prewarmed=1" '
   .trial_started_at as $started |
   .samples[] |
@@ -778,12 +788,14 @@ Prewarmed=1	2026-07-22T01:12:10Z	2026-07-22T01:13:00Z	2026-07-22T01:13:41Z	3
 
 ```bash
 # 두 시험에서 관찰된 인스턴스별 시작·최초 응답 시각을 출력합니다.
+# 첫 jq는 헤더를 한 번만 출력하고, Trial A JSON 각 행 앞에 "Prewarmed=0" 라벨을 붙여 표의 기준 열을 맞춥니다.
 jq -r '
   ["trial","instance","started_at","first_seen_at","first_response_age"],
   (.[] | ["Prewarmed=0", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)])
   | @tsv
 ' "$NO_PREWARM_OBSERVATIONS"
 
+# 두 번째 jq는 같은 열 순서를 유지한 채 Trial B 행만 이어 붙여 단일 실행의 전체 instance 타임라인 표를 완성합니다.
 jq -r '
   .[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv
 ' "$PREWARM_OBSERVATIONS"
@@ -812,6 +824,7 @@ Prewarmed=1	5d90b391	2026-07-23T03:30:21Z	2026-07-23T03:30:52Z	31
 
 ```bash
 # A/B 관찰 범위와 파일 유효성을 요약해 비교 가능한 결과인지 확인합니다.
+# `jq -s`는 Trial A/B 두 JSON 파일을 한 번에 slurp해 배열로 묶고, trial별 표본 수·최솟값·최댓값·범위를 한 번의 집계로 계산하게 합니다.
 jq -s -r '
   ["trial","samples","min_age","max_age","range"],
   (to_entries[] |
@@ -873,6 +886,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 - Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
 ```bash
+# 최근 10분의 InstanceCount 1분 Average만 표로 뽑아, 방금 시험 시간대에 scale-out 흔적이 있었는지 빠르게 진단합니다.
 START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
 az monitor metrics list \
   --resource "$APP_ID" \
@@ -889,6 +903,7 @@ az monitor metrics list \
 시험 A 뒤 4단계의 단일 인스턴스 게이트가 약 15분 안에 통과하지 못하면 시험 B를 실행하지 말고, 5단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
 
 ```bash
+# 1분 Average가 늦게 내려갈 수 있으므로, 같은 최근 10분 진단 조회를 1분 간격으로 5번 반복해 scale-in 진행 여부를 추적합니다.
 for attempt in $(seq 1 5); do
   az monitor metrics list \
     --resource "$APP_ID" \
@@ -937,6 +952,7 @@ else
 fi
 
 # Web App 설정 복원과 시작 지연 삭제는 서로 독립적으로 실행합니다.
+# Plan-level Automatic Scaling(ON, burst 5) 복원과 별도로 Web App-level Always-ready/Prewarmed를 다시 써 두 계층을 독립적으로 정상화합니다.
 az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
   --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
