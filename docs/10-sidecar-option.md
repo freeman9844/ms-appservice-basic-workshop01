@@ -84,6 +84,12 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 az webapp auth update -g $RG -n $APP --enabled false
 ```
 
+> ⚠️ **설정 전파에 30초~1분이 소요됩니다.** 비활성화 직후 2단계의 curl이 빈 출력이나 `401`/`302`를 반환할 수 있습니다. 잠시 기다린 후 다시 시도하십시오. 전파 여부는 아래 명령으로 확인할 수 있습니다(`200`이면 전파 완료).
+>
+> ```bash
+> curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/cache
+> ```
+
 ---
 
 ## 2단계 — 사이드카 부착 전 `/cache` 동작 확인
@@ -106,6 +112,8 @@ curl -s $APP_URL/cache | jq
 ```
 
 > 👁️ Redis가 없으면 앱이 오류를 발생시키지 않고 `"cache": "unavailable"` JSON을 반환합니다. 이것이 **우아한 실패(graceful degradation)** 패턴입니다.
+
+> ⚠️ **아무 출력도 나오지 않는 경우** — Easy Auth 비활성화(1단계)가 아직 전파되지 않아 빈 본문(`401`/`302`)이 반환된 것일 수 있습니다. 30초~1분 후 다시 시도하십시오. `echo $APP_URL`로 변수가 비어 있지 않은지도 함께 확인합니다.
 
 ---
 
