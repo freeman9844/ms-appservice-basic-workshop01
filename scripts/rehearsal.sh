@@ -680,7 +680,8 @@ if [ "${SKIP_OPTIONAL:-0}" != "1" ]; then
     --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET" \
     --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes -o none
   az webapp auth update -g "$RG" -n "$APP" --enabled true \
-    --action RedirectToLoginPage --redirect-provider azureActiveDirectory -o none
+    --action RedirectToLoginPage --redirect-provider azureActiveDirectory \
+    --token-store true -o none
   sleep 40
   code_api=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/")
   code_html=$(curl -s -o /dev/null -w "%{http_code}" -H "User-Agent: Mozilla/5.0" "$APP_URL/")

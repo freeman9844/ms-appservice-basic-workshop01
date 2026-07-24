@@ -124,10 +124,11 @@ az webapp auth microsoft update -g $RG -n $APP \
   --client-id $CLIENT_ID --client-secret "$CLIENT_SECRET" \
   --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes
 az webapp auth update -g $RG -n $APP --enabled true \
-  --action RedirectToLoginPage --redirect-provider azureActiveDirectory
+  --action RedirectToLoginPage --redirect-provider azureActiveDirectory \
+  --token-store true
 ```
 
-> 👁️ `az webapp auth config-version upgrade`는 새 Web App의 기본 인증 설정(v1)을 authV2 스키마로 업그레이드합니다. 이 명령 없이 `az webapp auth microsoft update`를 실행하면 `Cannot use auth v2 commands when the app is using auth v1` 오류가 발생합니다. `--action RedirectToLoginPage`는 미인증 요청을 자동으로 로그인 페이지로 리디렉션합니다. `--redirect-provider azureActiveDirectory`는 여러 공급자 중 기본 공급자를 Entra ID로 지정합니다. 설정이 App Service에 전파되기까지 수십 초가 소요될 수 있습니다.
+> 👁️ `az webapp auth config-version upgrade`는 새 Web App의 기본 인증 설정(v1)을 authV2 스키마로 업그레이드합니다. 이 명령 없이 `az webapp auth microsoft update`를 실행하면 `Cannot use auth v2 commands when the app is using auth v1` 오류가 발생합니다. `--action RedirectToLoginPage`는 미인증 요청을 자동으로 로그인 페이지로 리디렉션합니다. `--redirect-provider azureActiveDirectory`는 여러 공급자 중 기본 공급자를 Entra ID로 지정합니다. `--token-store true`는 로그인 시 획득한 토큰을 플랫폼에 저장하는 **Token Store**를 활성화합니다 — 3단계의 `/.auth/me` 클레임 확인에 필요하며, 비활성 상태면 로그인은 되지만 `/.auth/me`가 빈 배열(`[]`)을 반환합니다. 설정이 App Service에 전파되기까지 수십 초가 소요될 수 있습니다.
 
 🟢 **실행** — 설정 전파 후 HTTP 상태 코드를 확인합니다(전파가 완료되지 않았으면 30초 대기 후 재시도).
 
@@ -169,7 +170,9 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 $APP_URL/.auth/me
 ```
 
-🖼️ **예상 화면** — `user_id`, `id_token`, `user_claims` 배열(이름·이메일·테넌트 ID 등)이 포함된 JSON이 브라우저에 반환됩니다.
+🖼️ **예상 화면** — 최상위가 **배열(`[ { … } ]`)** 인 JSON이 반환되며, 배열 안 객체에 `user_id`, `id_token`, `user_claims` 배열(이름·이메일·테넌트 ID 등)이 포함됩니다.
+
+> ⚠️ **빈 배열(`[]`)이 반환되는 경우** — 2단계의 `--token-store true`가 누락되었거나 설정 전파 전에 로그인한 경우입니다. 2단계 명령을 다시 실행한 뒤, 브라우저에서 `$APP_URL/.auth/logout`으로 로그아웃하고 재로그인 후 다시 확인하십시오.
 
 ---
 
