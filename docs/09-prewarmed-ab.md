@@ -60,6 +60,29 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 
 ---
 
+## 👁️ Always ready, Prewarmed, Maximum burst 상세 이해
+
+`Always ready`, `Prewarmed`, `Maximum burst`는 CPU 임계값 같은 규칙을 직접 정의하는 Azure Monitor Autoscale이 아니라, HTTP 트래픽에 따라 플랫폼이 확장하는 **Automatic Scaling**에서 사용하는 설정입니다.
+
+| 적용 범위 | 설정 | 역할 | 이 실험의 기준값 |
+|---|---|---|---|
+| App Service Plan | Maximum burst | HTTP 부하에 따라 확장할 수 있는 최대 인스턴스 수 | 5 |
+| Web App | Always ready | 트래픽이 없어도 유지할 최소 인스턴스 수 | 1 |
+| Web App | Prewarmed | 다음 HTTP scale-out에 준비할 워밍 버퍼 수 | 1 |
+
+```mermaid
+flowchart LR
+    IDLE["낮은 트래픽<br/>Always ready 1"] -->|"HTTP 부하 증가"| SCALE["Prewarmed를 활성 인스턴스로 전환"]
+    SCALE -->|"추가 용량 필요"| MAX["Maximum burst 5까지 확장"]
+    MAX -->|"부하 종료 후 비동기 축소"| IDLE
+```
+
+Always ready를 높이면 트래픽이 적을 때도 유지하는 기본 용량과 비용이 함께 증가합니다. Prewarmed는 HTTP 부하가 증가할 때 새 인스턴스를 처음부터 준비하는 지연을 줄이는 워밍 버퍼이며, 할당된 시간에는 과금됩니다. 다만 `Prewarmed=1`이 항상 별도의 워밍 인스턴스 하나가 계속 실행된다는 의미는 아닙니다.
+
+뒤의 A/B 실험에서는 다른 Automatic Scaling 값은 유지한 채 `Prewarmed`만 0과 1로 변경하여, 새 instance의 시작과 실제 응답 투입 시점에서 관찰되는 차이를 비교합니다.
+
+---
+
 ## 선행 조건 확인
 
 > 👁️ Automatic Scaling의 개념과 설정 방법은 [07. 자동 스케일](07-autoscale.md)을 참고하세요. 이 심화 실험은 기본 07의 종료 상태인 **Automatic Scaling 활성, Maximum burst 5, Always ready 1, Prewarmed 1**에서 시작합니다.

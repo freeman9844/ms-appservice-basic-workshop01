@@ -58,22 +58,15 @@ Azure App Service에서 수평 스케일을 구현하는 대표적인 두 방식
 
 > 👁️ Automatic Scaling은 HTTP 트래픽을 기준으로 동작하며 배포 슬롯 트래픽을 지원하지 않습니다. 이 모듈에서는 staging URL이 아니라 production URL인 `$APP_URL`에 부하를 보냅니다.
 
-## 👁️ Always ready, Prewarmed, Maximum burst
+## 👁️ Automatic Scaling 설정값 요약
 
 | 설정 | 역할 | 이 모듈의 값 |
 |---|---|---|
-| Always ready | 트래픽이 없어도 유지할 앱의 최소 인스턴스 수 | 1 |
-| Prewarmed | 다음 scale-out에 빠르게 투입하기 위한 워밍 버퍼 | 1 |
-| Maximum burst | HTTP 부하에 따라 확장할 수 있는 최대 인스턴스 수 | 5 |
+| Always ready | 트래픽이 없어도 유지할 최소 인스턴스 수 | 1 |
+| Prewarmed | 다음 HTTP scale-out에 준비할 워밍 버퍼 수 | 1 |
+| Maximum burst | HTTP 부하에 따라 확장할 최대 인스턴스 수 | 5 |
 
-```mermaid
-flowchart LR
-    IDLE["낮은 트래픽<br/>Always ready 1"] -->|"HTTP 부하 증가"| SCALE["Prewarmed를 활성 인스턴스로 전환"]
-    SCALE -->|"추가 용량 필요"| MAX["Maximum burst 5까지 확장"]
-    MAX -->|"부하 종료 후 비동기 축소"| IDLE
-```
-
-Always ready 값을 높이면 기본 처리 용량과 비용이 함께 증가합니다. Prewarmed 인스턴스는 HTTP 부하가 증가할 때 처음부터 새 인스턴스를 준비하는 지연을 줄이는 워밍 버퍼이며, 실제로 할당된 시간에는 과금됩니다.
+> 👁️ 세 값은 Automatic Scaling 전용 설정입니다. 적용 범위, 확장 흐름, 비용과 Prewarmed 비교는 [09. Prewarmed A/B 실험](09-prewarmed-ab.md)에서 자세히 다룹니다.
 
 ---
 
