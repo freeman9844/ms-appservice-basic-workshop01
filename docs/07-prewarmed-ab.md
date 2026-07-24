@@ -451,10 +451,12 @@ fi
 
 if [ "$RESTORE_STATUS" -ne 0 ]; then
   echo "복원 실패: 트러블슈팅의 복구 명령을 실행하세요." >&2
-  false
+else
+  echo "Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료"
 fi
 
-echo "Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료"
+# 이 검사가 블록의 최종 종료 코드가 되어 실패를 다음 명령으로 넘기지 않습니다.
+[ "$RESTORE_STATUS" -eq 0 ]
 ```
 
 🟢 **실행 — 복원 상태 확인**
@@ -510,19 +512,24 @@ fi
 
 if [ "$VERIFY_STATUS" -ne 0 ]; then
   echo "복원 상태 불일치: 트러블슈팅의 복구 명령을 실행하세요." >&2
-  false
 fi
 
-for attempt in $(seq 1 18); do
-  if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
-    break
-  fi
-  if [ "$attempt" -eq 18 ]; then
-    echo "복원 후 /health 확인 실패" >&2
-    false
-  fi
-  sleep 5
-done
+if [ "$VERIFY_STATUS" -eq 0 ]; then
+  for attempt in $(seq 1 18); do
+    if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
+      break
+    fi
+    if [ "$attempt" -eq 18 ]; then
+      echo "복원 후 /health 확인 실패" >&2
+      VERIFY_STATUS=1
+      break
+    fi
+    sleep 5
+  done
+fi
+
+# 이 검사가 블록의 최종 종료 코드가 되어 조회·상태·health 실패를 보존합니다.
+[ "$VERIFY_STATUS" -eq 0 ]
 ```
 
 📋 **예상 출력**
