@@ -166,6 +166,7 @@ https://app-appsvcworkshop-XXXXX.azurewebsites.net
 🟢 **실행**
 
 ```bash
+# Web App의 현재 실행 상태를 확인합니다.
 az webapp show -g $RG -n $APP --query state -o tsv
 ```
 

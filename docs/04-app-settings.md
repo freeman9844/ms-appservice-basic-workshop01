@@ -23,6 +23,7 @@
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 Web App URL을 다시 계산합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -69,6 +70,7 @@ curl -s $APP_URL/api/info | jq '{message, started_at}'
 🟢 **실행**
 
 ```bash
+# WELCOME_MESSAGE 앱 설정을 추가해 런타임 환경 변수를 변경합니다.
 az webapp config appsettings set -g $RG -n $APP \
   --settings WELCOME_MESSAGE="안녕하세요, App Service 워크숍!"
 ```
@@ -137,6 +139,7 @@ WELCOME_MESSAGE                 안녕하세요, App Service 워크숍!     Fals
 🟢 **실행**
 
 ```bash
+# 변경된 메시지와 재시작된 프로세스 시각을 최종 확인합니다.
 curl -s $APP_URL/api/info | jq '{message, started_at}'
 az webapp config appsettings list -g $RG -n $APP -o table
 ```

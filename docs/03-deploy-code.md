@@ -35,6 +35,7 @@ flowchart LR
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 현재 Web App URL을 다시 계산합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -59,6 +60,7 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 🟢 **실행**
 
 ```bash
+# zip 배포 시 App Service가 requirements.txt를 사용해 서버 측 Oryx 빌드를 수행하도록 설정합니다.
 az webapp config appsettings set -g $RG -n $APP \
   --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true
 ```
@@ -80,6 +82,7 @@ az webapp config appsettings set -g $RG -n $APP \
 🟢 **실행**
 
 ```bash
+# Flask 앱을 zip으로 묶고 App Service에 배포합니다.
 cd ~/ms-appservice-basic-workshop01/app
 zip -r /tmp/app-v1.zip . -x "tests/*" -x "__pycache__/*" -x "*.pyc"
 az webapp deploy -g $RG -n $APP --src-path /tmp/app-v1.zip --type zip --track-status
@@ -132,6 +135,7 @@ You can visit your app at: http://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 🟢 **실행**
 
 ```bash
+# 배포된 앱의 헬스 상태와 런타임 정보를 외부 URL에서 확인합니다.
 curl -s $APP_URL/health
 curl -s $APP_URL/api/info | jq
 ```
@@ -191,6 +195,7 @@ az webapp log tail -g $RG -n $APP
 🟢 **실행** (새 Cloud Shell 탭)
 
 ```bash
+# 새 터미널에서 요청을 보내 로그 스트림에 기록할 이벤트를 생성합니다.
 curl -s $APP_URL/health
 curl -s $APP_URL/api/info | jq
 ```
@@ -215,6 +220,7 @@ GET /api/info ... 200
 🟢 **실행**
 
 ```bash
+# 배포 결과와 현재 인스턴스 정보를 최종 확인합니다.
 curl -s $APP_URL/api/info | jq
 ```
 

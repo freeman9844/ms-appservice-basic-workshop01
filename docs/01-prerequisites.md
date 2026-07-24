@@ -23,6 +23,7 @@ Cloud Shell은 Azure Portal에 로그인된 계정으로 자동 인증되므로 
 🟢 **실행**
 
 ```bash
+# 현재 로그인한 구독과 Azure CLI 버전을 확인합니다.
 az account show -o table
 az version
 ```
@@ -34,6 +35,7 @@ az version
 🟢 **실행** (구독 전환이 필요한 경우에만)
 
 ```bash
+# 워크숍 리소스를 만들 구독으로 전환한 뒤 선택 결과를 확인합니다.
 az account set --subscription "<구독 ID 또는 이름>"
 az account show -o table
 ```
@@ -56,6 +58,7 @@ Name                  CloudName    SubscriptionId                        State  
 🟢 **실행**
 
 ```bash
+# 워크숍에서 사용할 Application Insights, Easy Auth, Log Analytics 확장을 설치합니다.
 az extension add --name application-insights --upgrade --only-show-errors
 az extension add --name authV2 --upgrade --only-show-errors
 az extension add --name log-analytics --upgrade --only-show-errors
@@ -70,6 +73,7 @@ az extension add --name log-analytics --upgrade --only-show-errors
 🟢 **실행**
 
 ```bash
+# 워크숍 리포지토리를 복제하고 작업 디렉터리로 이동합니다.
 git clone https://github.com/jungwoonlee_microsoft/ms-appservice-basic-workshop01.git
 cd ms-appservice-basic-workshop01
 ```
@@ -83,6 +87,7 @@ cd ms-appservice-basic-workshop01
 🟢 **실행**
 
 ```bash
+# 구독과 리포지토리 준비 상태를 최종 확인합니다.
 az account show -o table
 ls app/
 ```

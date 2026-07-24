@@ -10,7 +10,6 @@
 
 - Entra 앱 등록(`CLIENT_ID`)을 생성하고 리디렉션 URI를 구성합니다.
 - `authV2` 확장으로 Easy Auth를 활성화하여 미인증 요청을 로그인 페이지로 리디렉션합니다.
-- `/.auth/me` 내장 엔드포인트에서 클레임 JSON을 확인합니다.
 - **코드 수정 없이** 플랫폼이 앞단에서 인증을 처리하는 Easy Auth 구조를 이해합니다.
 - 모듈 종료 상태: **Entra 로그인 게이트 활성**.
 
@@ -36,6 +35,7 @@ flowchart LR
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 Web App URL을 다시 계산합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -119,10 +119,12 @@ echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 12 정리에서 필요 — 메모
 🟢 **실행** — Microsoft 공급자를 구성한 뒤 Easy Auth를 활성화합니다.
 
 ```bash
+# 인증 설정을 auth v2 스키마로 올리고 Microsoft Entra 공급자를 연결합니다.
 az webapp auth config-version upgrade -g $RG -n $APP
 az webapp auth microsoft update -g $RG -n $APP \
   --client-id $CLIENT_ID --client-secret "$CLIENT_SECRET" \
   --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes
+# 미인증 브라우저 요청을 Entra 로그인 페이지로 보내도록 Easy Auth를 활성화합니다.
 az webapp auth update -g $RG -n $APP --enabled true \
   --action RedirectToLoginPage --redirect-provider azureActiveDirectory
 ```
@@ -132,6 +134,7 @@ az webapp auth update -g $RG -n $APP --enabled true \
 🟢 **실행** — 설정 전파 후 HTTP 상태 코드를 확인합니다(전파가 완료되지 않았으면 30초 대기 후 재시도).
 
 ```bash
+# API 클라이언트와 브라우저 요청이 각각 401과 302를 반환하는지 확인합니다.
 curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/
 curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 ```
@@ -155,7 +158,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 
 ![Entra 로그인 후 표시되는 권한 동의 화면 — auth-appsvcworkshop 앱이 기본 프로필 조회 권한을 요청](images/09-entra-consent.png)
 
-> 👁️ 동의 화면의 "View your basic profile" 권한은 Easy Auth가 `/.auth/me`에서 사용자 클레임을 표시하기 위해 필요한 최소 권한입니다. "이 애플리케이션은 Microsoft에서 게시하지 않았습니다" 문구는 방금 생성한 워크숍용 앱 등록이므로 정상입니다.
+> 👁️ 동의 화면의 "View your basic profile" 권한은 Easy Auth가 로그인 사용자의 기본 프로필 클레임을 받기 위해 필요한 최소 권한입니다. "이 애플리케이션은 Microsoft에서 게시하지 않았습니다" 문구는 방금 생성한 워크숍용 앱 등록이므로 정상입니다.
 
 🖼️ **예상 화면** — 로그인 후 `$APP_URL`의 Flask 앱 페이지가 정상 표시됩니다.
 
@@ -163,60 +166,11 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 
 > 👁️ 화면의 버전(v1/v2)과 배경색은 모듈 진행 상태에 따라 다를 수 있습니다. 로그인 게이트를 통과해 앱 페이지가 표시되는 것이 검증 포인트입니다.
 
-🟢 **브라우저에서 아래 URL에 접속**하여 클레임 JSON을 확인합니다.
-
-```
-$APP_URL/.auth/me
-```
-
-🖼️ **예상 화면** — `user_id`, `id_token`, `user_claims` 배열(이름·이메일·테넌트 ID 등)이 포함된 JSON이 브라우저에 반환됩니다.
-
----
-
-## 검증
-
-### HTTP 상태 코드 확인
-
-🟢 **실행**
-
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/
-curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
-```
-
-📋 **예상 출력**
-
-```
-401
-302
-```
-
-### Easy Auth 활성 상태 확인
-
-🟢 **실행**
-
-```bash
-az webapp auth show -g $RG -n $APP \
-  --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table
-```
-
-📋 **예상 출력**
-
-```
-Enabled    Action
----------  --------------------
-True       RedirectToLoginPage
-```
-
-curl로 `401`/`302`가 확인되면 Easy Auth가 정상 활성화된 것입니다.
-
-🖼️ **예상 화면** — 브라우저에서 `$APP_URL`에 접속하면 Entra 로그인 화면으로 리디렉션되고, 로그인 후 `$APP_URL/.auth/me`에서 사용자 클레임 JSON을 확인할 수 있습니다.
-
 ---
 
 ## 트러블슈팅
 
-### (1) curl이 401/302가 아닌 200을 반환
+### (1) 브라우저 접속 시 로그인 리디렉션 없이 앱이 바로 표시됨
 
 Easy Auth 설정이 아직 전파 중입니다. 30초–1분 대기 후 재시도하거나, 현재 활성 상태를 확인합니다.
 
@@ -225,7 +179,7 @@ az webapp auth show -g $RG -n $APP \
   --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table
 ```
 
-`enabled`가 `true`이고 `action`이 `RedirectToLoginPage`인지 확인합니다. 값이 올바르면 추가 대기 후 curl을 재시도합니다.
+`enabled`가 `true`이고 `action`이 `RedirectToLoginPage`인지 확인합니다. 값이 올바르면 추가 대기 후 브라우저에서 재시도합니다.
 
 ### (2) AADSTS 오류 — 리디렉션 URI 불일치
 

@@ -36,6 +36,7 @@ flowchart LR
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 Web App URL을 다시 계산합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -84,6 +85,12 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 az webapp auth update -g $RG -n $APP --enabled false
 ```
 
+> ⚠️ **설정 전파에 30초~1분이 소요됩니다.** 비활성화 직후 2단계의 curl이 빈 출력이나 `401`/`302`를 반환할 수 있습니다. 잠시 기다린 후 다시 시도하십시오. 전파 여부는 아래 명령으로 확인할 수 있습니다(`200`이면 전파 완료).
+>
+> ```bash
+> curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/cache
+> ```
+
 ---
 
 ## 2단계 — 사이드카 부착 전 `/cache` 동작 확인
@@ -107,6 +114,8 @@ curl -s $APP_URL/cache | jq
 
 > 👁️ Redis가 없으면 앱이 오류를 발생시키지 않고 `"cache": "unavailable"` JSON을 반환합니다. 이것이 **우아한 실패(graceful degradation)** 패턴입니다.
 
+> ⚠️ **아무 출력도 나오지 않는 경우** — Easy Auth 비활성화(1단계)가 아직 전파되지 않아 빈 본문(`401`/`302`)이 반환된 것일 수 있습니다. 30초~1분 후 다시 시도하십시오. `echo $APP_URL`로 변수가 비어 있지 않은지도 함께 확인합니다.
+
 ---
 
 ## 3단계 — Redis 사이드카 부착
@@ -114,6 +123,7 @@ curl -s $APP_URL/cache | jq
 🟢 **실행** — `az webapp sitecontainers create` 명령으로 MCR 미러 Redis 이미지를 사이드카로 부착하고 앱을 재시작합니다.
 
 ```bash
+# Redis를 보조 컨테이너로 추가하고 Web App을 재시작해 새 컨테이너 구성을 적용합니다.
 az webapp sitecontainers create -g $RG -n $APP --container-name redis \
   --image mcr.microsoft.com/mirror/docker/library/redis:7.2 --is-main false
 az webapp restart -g $RG -n $APP
@@ -126,16 +136,19 @@ az webapp restart -g $RG -n $APP
 🟢 **실행** — 사이드카 목록을 확인합니다.
 
 ```bash
+# Web App에 연결된 main·sidecar 컨테이너 목록을 확인합니다.
 az webapp sitecontainers list -g $RG -n $APP -o table
 ```
 
-📋 **예상 출력**
+📋 **예상 출력 (예시)**
 
 ```
-Name    Image                                                      IsMain
-------  ---------------------------------------------------------  --------
-redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
+AuthType    CreatedTime                 Image                                              IsMain    LastModifiedTime            Name    ResourceGroup
+----------  --------------------------  -------------------------------------------------  --------  --------------------------  ------  -------------------------
+Anonymous   2026-07-24T02:24:37.850000  mcr.microsoft.com/mirror/docker/library/redis:7.2  False     2026-07-24T02:24:37.850000  redis   rg-appsvcworkshop-<SUFFIX>
 ```
+
+> 👁️ `Name`이 `redis`, `IsMain`이 `False`, `Image`가 지정한 MCR 미러 이미지인지 확인합니다. `CreatedTime`·`LastModifiedTime`은 실행 시점에 따라 다릅니다.
 
 ---
 
@@ -146,6 +159,7 @@ redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
 🟢 **실행** — 인스턴스 수 확인
 
 ```bash
+# 여러 인스턴스에서 증가 결과가 갈라지지 않도록 현재 인스턴스 수를 확인합니다.
 az webapp list-instances -g $RG -n $APP -o table
 ```
 
@@ -178,67 +192,6 @@ curl -s $APP_URL/cache | jq   # visits 증가 확인
 ```
 
 > 👁️ `"cache": "ok"`는 Redis가 정상 동작 중임을 의미합니다. `visits` 값이 호출마다 증가하면 사이드카가 앱과 정상 통신하고 있는 것입니다.
-
----
-
-## 5단계 — Easy Auth 재활성화 안내(모듈 09 수행자만)
-
-> 👁️ Easy Auth를 다시 활성화하려면 아래 명령을 실행하십시오. **다음 모듈 11(선택)로 진행하는 경우 11 첫머리에서 다시 비활성화하므로 지금 재활성화를 생략해도 됩니다.** 모듈 09를 건너뛴 참가자는 이 단계도 건너뛰세요.
-
-```bash
-az webapp auth update -g $RG -n $APP --enabled true
-```
-
----
-
-## 검증
-
-### 사이드카 목록 확인
-
-🟢 **실행**
-
-```bash
-az webapp sitecontainers list -g $RG -n $APP -o table
-```
-
-📋 **예상 출력**
-
-```
-Name    Image                                                      IsMain
-------  ---------------------------------------------------------  --------
-redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
-```
-
-### /cache 동작 확인
-
-🟢 **실행**
-
-```bash
-curl -s $APP_URL/cache | jq
-curl -s $APP_URL/cache | jq
-```
-
-📋 **예상 출력 — 첫 번째 호출**
-
-```json
-{
-  "cache": "ok",
-  "redis_host": "localhost",
-  "visits": 1
-}
-```
-
-📋 **예상 출력 — 두 번째 호출**
-
-```json
-{
-  "cache": "ok",
-  "redis_host": "localhost",
-  "visits": 2
-}
-```
-
-`visits`가 호출마다 단조 증가하면(인스턴스 1개 기준) Redis 사이드카가 정상 동작하는 것입니다.
 
 ---
 

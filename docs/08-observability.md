@@ -26,6 +26,7 @@
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수와 Application Insights 리소스 이름을 복원합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -66,6 +67,7 @@ Azure에서 웹앱 가시성을 확보하는 경로는 두 가지입니다.
 🟢 **실행** — 웹앱 및 LAW 리소스 ID를 조회한 뒤 진단 설정을 생성합니다.
 
 ```bash
+# App Service의 HTTP·콘솔·플랫폼 로그와 메트릭을 Log Analytics로 전송합니다.
 WEBAPP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
 LAW_ID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query id -o tsv)
 az monitor diagnostic-settings create --name appsvc-diag --resource $WEBAPP_ID \
@@ -96,6 +98,7 @@ for i in $(seq 1 30); do curl -s $APP_URL/api/info > /dev/null; done
 🟢 **실행** — 01 모듈에서 설치한 `log-analytics` 확장을 사용해 LAW 워크스페이스 ID를 조회하고 KQL 쿼리를 실행합니다.
 
 ```bash
+# Log Analytics에서 App Service HTTP 로그를 경로와 상태 코드별로 집계합니다.
 LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
 az monitor log-analytics query -w $LAW_CID --analytics-query \
   'AppServiceHTTPLogs | where TimeGenerated > ago(30m)
@@ -133,6 +136,7 @@ AppServiceHTTPLogs
 🟢 **실행** — 01 모듈에서 설치한 `application-insights` 확장으로 커넥션 스트링을 조회하고, Linux용 App Service 관리형 Python 에이전트(`~3`)를 함께 활성화합니다.
 
 ```bash
+# Application Insights 연결 문자열과 App Service 관리형 Python 에이전트를 활성화합니다.
 AI_CONN=$(az monitor app-insights component show \
   -g $RG --app $APPI --query connectionString -o tsv)
 
@@ -145,6 +149,7 @@ az webapp config appsettings set -g $RG -n $APP \
 🟢 **실행** — 커넥션 스트링 값은 출력하지 않고, 두 필수 설정이 존재하는지만 확인합니다.
 
 ```bash
+# 연결 문자열을 노출하지 않고 관리형 계측에 필요한 두 설정이 존재하는지 확인합니다.
 AI_SETTINGS_OK=$(az webapp config appsettings list -g $RG -n $APP \
   --query "[?name=='APPLICATIONINSIGHTS_CONNECTION_STRING' && value!='' ||
              name=='ApplicationInsightsAgent_EXTENSION_VERSION' && value=='~3'] |
@@ -161,6 +166,7 @@ fi
 🟢 **실행** — 앱 재시작 완료를 확인합니다.
 
 ```bash
+# 앱 설정 변경으로 재시작된 Web App이 다시 정상화될 때까지 기다립니다.
 HEALTH_CHECK_STATUS=1
 for attempt in $(seq 1 18); do
   if curl -fsS --max-time 10 "$APP_URL/health" |
@@ -181,6 +187,7 @@ fi
 🟢 **실행** — 정상·느린·실패 요청을 구분하여 생성합니다.
 
 ```bash
+# 정상·느린·404 요청을 생성해 성능과 실패 분석용 텔레메트리를 만듭니다.
 for i in $(seq 1 20); do
   curl -fsS "$APP_URL/api/info" > /dev/null
 done
@@ -202,6 +209,7 @@ done
 🟢 **실행** — 같은 LAW의 workspace 기반 App Insights 테이블인 `AppRequests`를 최대 5분간 확인합니다. Cloud Shell에서는 `api.applicationinsights.io` audience가 지원되지 않을 수 있으므로 `az monitor app-insights query` 대신 3단계와 같은 `az monitor log-analytics query`를 사용합니다.
 
 ```bash
+# AppRequests 적재를 기다린 뒤 경로별 요청 수와 응답 시간 분포를 조회합니다.
 LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
 APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
 

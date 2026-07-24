@@ -24,6 +24,7 @@
 🟢 **실행**
 
 ```bash
+# 이전 모듈의 리소스 변수를 복원하고 슬롯 URL을 구성합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -130,6 +131,7 @@ app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 🟢 **실행**
 
 ```bash
+# 라우팅 쿼리 파라미터로 staging 또는 production 슬롯을 강제 선택해 각각의 버전을 확인합니다.
 curl -s "$APP_URL/?x-ms-routing-name=staging" | grep -o 'v[0-9]'   # v2 (staging 강제)
 curl -s "$APP_URL/?x-ms-routing-name=self" | grep -o 'v[0-9]'      # v1 (production 강제)
 ```
@@ -152,6 +154,7 @@ v1
 🟢 **실행**
 
 ```bash
+# 20% 분기 규칙을 제거하고 staging의 v2를 production으로 승격합니다.
 az webapp traffic-routing clear -g $RG -n $APP
 az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
 curl -s $APP_URL/api/info | jq -r .version   # v2 — 승격 완료
@@ -178,6 +181,7 @@ v2
 🟢 **실행**
 
 ```bash
+# production에 남은 가중치 라우팅 규칙이 없는지 확인합니다.
 az webapp traffic-routing show -g $RG -n $APP -o table
 ```
 
@@ -191,6 +195,7 @@ az webapp traffic-routing show -g $RG -n $APP -o table
 🟢 **실행**
 
 ```bash
+# 카나리 승격 후 production이 v2를 제공하는지 확인합니다.
 curl -s $APP_URL/api/info | jq -r .version
 ```
 
