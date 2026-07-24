@@ -1,6 +1,6 @@
 # Azure App Service 기본 핸즈온 워크숍
 
-> Azure App Service의 핵심 라이프사이클을 **Cloud Shell 중심**으로 체험하는 한국어 핸즈온 워크숍입니다(코어 약 1시간 16분–1시간 50분, 09–11 선택 모듈 포함 시 약 1시간 42분–2시간 29분). Python(Flask) 앱을 zip 배포(Oryx 빌드)로 올리고, 앱 설정 → 슬롯 스왑 → 카나리 → 자동 스케일 → 관찰 가능성까지 단계별로 실습합니다. 선택 모듈에서는 **Prewarmed A/B 심화 실험**, **인증(Easy Auth)**, **사이드카 컨테이너**, **Auto-heal & 진단**을 추가로 체험할 수 있습니다.
+> Azure App Service의 핵심 라이프사이클을 **Cloud Shell 중심**으로 체험하는 한국어 핸즈온 워크숍입니다(코어 약 1시간 16분–1시간 50분, 09–12 선택 모듈 포함 시 약 2시간 2분–2시간 59분). Python(Flask) 앱을 zip 배포(Oryx 빌드)로 올리고, 앱 설정 → 슬롯 스왑 → 카나리 → 자동 스케일 → 관찰 가능성까지 단계별로 실습합니다. 선택 모듈에서는 **Prewarmed A/B 심화 실험**, **인증(Easy Auth)**, **사이드카 컨테이너**, **Auto-heal & 진단**을 추가로 체험할 수 있습니다.
 
 ---
 
@@ -15,7 +15,7 @@ flowchart LR
   end
   prod -. 진단 로그/텔레메트리 .-> law[(Log Analytics<br/>+ App Insights)]
   stg -. 진단 로그/텔레메트리 .-> law
-  entra[Entra ID] -.->|"Easy Auth (선택 모듈 09)"| prod
+  entra[Entra ID] -.->|"Easy Auth (선택 모듈 10)"| prod
 ```
 
 ---
@@ -46,7 +46,7 @@ flowchart LR
 | Azure 구독 | 소유자 또는 기여자 역할 보유 |
 | Cloud Shell | Azure Portal의 Bash Cloud Shell(별도 설치 불필요) |
 | 웹앱 기본 개념 | HTTP 요청·응답, 환경변수 개념 이해(컨테이너·Kubernetes 지식 불필요) |
-| 비용 | 실습 완료 후 정리 모듈(12) 수행 권장(예상 비용: 아래 비용 개요 참조) |
+| 비용 | 실습 완료 후 정리 모듈(13) 수행 권장(예상 비용: 아래 비용 개요 참조) |
 
 > **💡 kubectl·Docker 불필요** — 실습은 Cloud Shell에서 `az` CLI를 중심으로 진행하며 `curl`, `jq`, `hey`, 일부 Python 관찰 스크립트를 함께 사용합니다. 컨테이너나 Kubernetes 지식이 없어도 진행할 수 있습니다.
 
@@ -54,7 +54,7 @@ flowchart LR
 
 ## 모듈 목차
 
-**코어 모듈 (01–08, 12)** — 순서대로 진행하세요. 이전 모듈의 산출물(리소스 그룹·Plan·Web App·슬롯)을 다음 모듈이 사용합니다.
+**코어 모듈 (01–08, 13)** — 순서대로 진행하세요. 이전 모듈의 산출물(리소스 그룹·Plan·Web App·슬롯)을 다음 모듈이 사용합니다.
 
 | # | 모듈 | 한 줄 설명 |
 |---|------|------------|
@@ -67,31 +67,31 @@ flowchart LR
 | 06 | [슬롯 트래픽 분할 카나리](docs/06-traffic-split-canary.md) | staging 20% 라우팅 → curl 100회 반복 정량 관찰 → 100% 승격 |
 | 07 | [자동 스케일](docs/07-autoscale.md) | Automatic Scaling 구성 → `hey` 부하 → `InstanceCount` 확장·축소 흐름 관찰 |
 | 08 | [관찰 가능성](docs/08-observability.md) | 진단 설정 → LAW KQL 조회, App Insights 커넥션 스트링 주입 → 요청 텔레메트리 |
-| 12 | [정리](docs/12-cleanup.md) | RG 삭제 + Entra 앱 등록 삭제 + 과금 종료 확인 |
+| 13 | [정리](docs/13-cleanup.md) | RG 삭제 + Entra 앱 등록 삭제 + 과금 종료 확인 |
 
-**선택 모듈 (07 심화, 09–11)** — 07 심화는 코어 07 직후를 권장하며, 09–11은 코어 08을 마친 뒤 관심 있는 것만 골라 진행하세요. 마지막에는 12 정리로 이동합니다.
+**선택 모듈 (09–12)** — 09는 코어 07 직후를 권장하며, 10–12는 코어 08을 마친 뒤 관심 있는 것만 골라 진행하세요. 마지막에는 13 정리로 이동합니다.
 
 | # | 모듈 | 한 줄 설명 |
 |---|------|------------|
-| 07 심화 | [(선택) Prewarmed A/B 실험](docs/07-prewarmed-ab.md) | Prewarmed 0/1에서 새 instance의 시작·최초 응답 타임라인 비교 |
-| 09 | [(선택) 인증 (Easy Auth)](docs/09-easy-auth.md) | Entra 앱 등록 → `az webapp auth` 구성 → 로그인 게이트 → `/.auth/me` |
-| 10 | [(선택) 사이드카 컨테이너](docs/10-sidecar-option.md) | sitecontainers API로 Redis 사이드카 부착 → `/cache` 방문 카운터 동작 확인 |
-| 11 | [(선택) Auto-heal & 진단](docs/11-autoheal-option.md) | `/slow` 반복 → Auto-heal 재활용 규칙 → 재활용 이벤트 확인, 진단 블레이드 소개 |
+| 09 | [(선택) Prewarmed A/B 실험](docs/09-prewarmed-ab.md) | Prewarmed 0/1에서 새 instance의 시작·최초 응답 타임라인 비교 |
+| 10 | [(선택) 인증 (Easy Auth)](docs/10-easy-auth.md) | Entra 앱 등록 → `az webapp auth` 구성 → 로그인 게이트 → `/.auth/me` |
+| 11 | [(선택) 사이드카 컨테이너](docs/11-sidecar-option.md) | sitecontainers API로 Redis 사이드카 부착 → `/cache` 방문 카운터 동작 확인 |
+| 12 | [(선택) Auto-heal & 진단](docs/12-autoheal-option.md) | `/slow` 반복 → Auto-heal 재활용 규칙 → 재활용 이벤트 확인, 진단 블레이드 소개 |
 
 ### 선택 모듈, 무엇을 고를까?
 
-**07 심화 Prewarmed A/B**는 Automatic Scaling의 기본 동작보다 더 깊게 관찰하려는 참가자를 위한 실험입니다. `hey`, 두 Python observer, Azure Monitor `InstanceCount`를 함께 사용하며 약 20–30분이 걸립니다. 기본 07 직후 수행하면 다른 선택 기능의 영향을 피할 수 있습니다.
+**09 Prewarmed A/B**는 Automatic Scaling의 기본 동작보다 더 깊게 관찰하려는 참가자를 위한 실험입니다. `hey`, 두 Python observer, Azure Monitor `InstanceCount`를 함께 사용하며 약 20–30분이 걸립니다. 기본 07 직후 수행하면 다른 선택 기능의 영향을 피할 수 있습니다.
 
-09–11 세 모듈은 순서 의존성 없이 **어떤 조합으로든** 건너뛰거나 골라 진행할 수 있습니다(단, 09 수행 후 10·11 진행 시 첫 단계에서 Easy Auth 일시 비활성화 필요).
+10–12 세 모듈은 순서 의존성 없이 **어떤 조합으로든** 건너뛰거나 골라 진행할 수 있습니다(단, 10 수행 후 11·12 진행 시 첫 단계에서 Easy Auth 일시 비활성화 필요).
 
-| | 09 인증 (Easy Auth) | 10 사이드카 | 11 Auto-heal & 진단 |
+| | 10 인증 (Easy Auth) | 11 사이드카 | 12 Auto-heal & 진단 |
 |---|---|---|---|
 | **주제** | 코드 수정 없는 Entra ID 로그인 게이트 | Redis 사이드카로 localhost 캐시 | 슬로우 요청 자동 감지·프로세스 재활용 |
 | **이런 분께** | 코드 변경 없이 앱 앞단에 인증을 붙이고 싶다 | 앱 옆에 보조 컨테이너를 붙이는 패턴이 궁금하다 | 운영 중 자가 복구·진단 도구가 궁금하다 |
 | **도구** | az CLI (webapp auth) + 브라우저 | az CLI (sitecontainers) | az resource update + curl |
 | **상태** | GA | GA | GA |
 | **소요 시간** | 10–15분 | 8–12분 | 8–12분 |
-| **유의 사항** | Entra 앱 등록 권한 필요; 이후 10·11 진행 시 첫 단계에서 일시 비활성화 | 모듈 09 수행 시 첫 단계에서 Easy Auth 일시 비활성화 필요 | 모듈 09 수행 시 첫 단계에서 Easy Auth 일시 비활성화 필요; 재활용 관찰 대기 약 90초 |
+| **유의 사항** | Entra 앱 등록 권한 필요; 이후 11·12 진행 시 첫 단계에서 일시 비활성화 | 모듈 10 수행 시 첫 단계에서 Easy Auth 일시 비활성화 필요 | 모듈 10 수행 시 첫 단계에서 Easy Auth 일시 비활성화 필요; 재활용 관찰 대기 약 90초 |
 
 ---
 
@@ -107,30 +107,29 @@ flowchart LR
 | 05 | 배포 슬롯 & 스왑 | 10–15분 | 슬롯 생성 + v2 Oryx 빌드 대기 |
 | 06 | 슬롯 트래픽 분할 카나리 | 8–12분 | curl 100회 반복 관찰 |
 | 07 | 자동 스케일 | 10–15분 | 180초 부하 + scale-in 흐름 최대 5분 관찰 |
-| 07 심화 | (선택) Prewarmed A/B 실험 | 20–30분 | 동일 부하 A/B + 시험 사이 scale-in 5–10분 |
 | 08 | 관찰 가능성 | 10–15분 | 진단 로그 적재 대기 5–10분 |
-| 09 | (선택) 인증 (Easy Auth) | 10–15분 | 인증 설정 전파 + 브라우저 로그인 |
-| 10 | (선택) 사이드카 컨테이너 | 8–12분 | 사이드카 부착 후 재시작 대기 ~60초 |
-| 11 | (선택) Auto-heal & 진단 | 8–12분 | 트리거 후 재활용 관찰 ~90초 |
-| 12 | 정리 | 5–8분 | RG 삭제 요청(비동기) |
-| | **코어 (01–08 + 12)** | **≈ 1시간 16분–1시간 50분** | |
-| | **전체 (01–12, 07 심화 제외)** | **≈ 1시간 42분–2시간 29분** | |
-| | **전체 + 07 심화** | **≈ 2시간 2분–2시간 59분** | |
+| 09 | (선택) Prewarmed A/B 실험 | 20–30분 | 동일 부하 A/B + 시험 사이 scale-in 5–10분 |
+| 10 | (선택) 인증 (Easy Auth) | 10–15분 | 인증 설정 전파 + 브라우저 로그인 |
+| 11 | (선택) 사이드카 컨테이너 | 8–12분 | 사이드카 부착 후 재시작 대기 ~60초 |
+| 12 | (선택) Auto-heal & 진단 | 8–12분 | 트리거 후 재활용 관찰 ~90초 |
+| 13 | 정리 | 5–8분 | RG 삭제 요청(비동기) |
+| | **코어 (01–08 + 13)** | **≈ 1시간 16분–1시간 50분** | |
+| | **전체 (01–13)** | **≈ 2시간 2분–2시간 59분** | |
 
 ---
 
 ## 비용 개요
 
-> 실습 후 반드시 [12 정리](docs/12-cleanup.md) 모듈을 수행하여 불필요한 과금을 방지하세요.
+> 실습 후 반드시 [13 정리](docs/13-cleanup.md) 모듈을 수행하여 불필요한 과금을 방지하세요.
 
 | 리소스 | 과금 방식 | 비고 |
 |--------|-----------|------|
 | App Service Plan P0v4 (Linux) | 인스턴스 실행 시간 기준 시간 단위 과금 | 슬롯 추가 과금 없음(같은 Plan 공유) |
 | Log Analytics Workspace | 수집 데이터 GB 단위 과금 | 실습 수준 데이터 소량 |
 | Application Insights (workspace-based) | 수집 데이터 GB 단위 과금 | 실습 수준 소량 |
-| Entra ID 앱 등록 | 무료 | 12 정리에서 삭제 필수 |
+| Entra ID 앱 등록 | 무료 | 13 정리에서 삭제 필수 |
 
-전체 실습과 07 심화까지 수행하는 약 2시간 2분–2시간 59분 기준 예상 비용은 **USD $1 미만** 수준입니다. 이는 P0v4 1인스턴스 중심 사용(Automatic Scaling은 최대 5개로 수 분 확장)을 더한 대략치이며, 실습 종료 즉시 정리(12) 수행을 권장합니다. 요금은 리전·통화·시점에 따라 변동될 수 있습니다.
+전체 실습(01–13)의 약 2시간 2분–2시간 59분 기준 예상 비용은 **USD $1 미만** 수준입니다. 이는 P0v4 1인스턴스 중심 사용(Automatic Scaling은 최대 5개로 수 분 확장)을 더한 대략치이며, 실습 종료 즉시 정리(13) 수행을 권장합니다. 요금은 리전·통화·시점에 따라 변동될 수 있습니다.
 
 ---
 
@@ -160,12 +159,12 @@ flowchart LR
 | sed 치환·스왑 문제 | [05 배포 슬롯 & 스왑](docs/05-deployment-slots-swap.md#트러블슈팅) |
 | 트래픽 분할 비율이 안 보임 | [06 슬롯 트래픽 분할 카나리](docs/06-traffic-split-canary.md#트러블슈팅) |
 | 인스턴스가 확장/축소되지 않음 | [07 자동 스케일](docs/07-autoscale.md#트러블슈팅) |
-| Prewarmed A/B 관찰·복원이 실패함 | [07 심화 Prewarmed A/B](docs/07-prewarmed-ab.md#트러블슈팅) |
+| Prewarmed A/B 관찰·복원이 실패함 | [09 Prewarmed A/B](docs/09-prewarmed-ab.md#트러블슈팅) |
 | KQL 쿼리 결과 없음 | [08 관찰 가능성](docs/08-observability.md#트러블슈팅) |
-| 로그인 리디렉션이 안 됨 | [09 (선택) 인증 (Easy Auth)](docs/09-easy-auth.md#트러블슈팅) |
-| `/cache`가 계속 unavailable | [10 (선택) 사이드카 컨테이너](docs/10-sidecar-option.md#트러블슈팅) |
-| Auto-heal 재활용이 안 일어남 | [11 (선택) Auto-heal & 진단](docs/11-autoheal-option.md#트러블슈팅) |
-| 리소스 삭제 후 과금 지속 | [12 정리](docs/12-cleanup.md#트러블슈팅) |
+| 로그인 리디렉션이 안 됨 | [10 (선택) 인증 (Easy Auth)](docs/10-easy-auth.md#트러블슈팅) |
+| `/cache`가 계속 unavailable | [11 (선택) 사이드카 컨테이너](docs/11-sidecar-option.md#트러블슈팅) |
+| Auto-heal 재활용이 안 일어남 | [12 (선택) Auto-heal & 진단](docs/12-autoheal-option.md#트러블슈팅) |
+| 리소스 삭제 후 과금 지속 | [13 정리](docs/13-cleanup.md#트러블슈팅) |
 
 ---
 
