@@ -761,4 +761,4 @@ P0v4가 지원되지 않는 것이 아니라 Azure CLI의 SKU 검증 로직이 P
 
 ---
 
-이전 코어 모듈: [07. 자동 스케일](07-autoscale.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)
+권장 이전 모듈: [07. 자동 스케일](07-autoscale.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)

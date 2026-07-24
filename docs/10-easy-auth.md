@@ -6,7 +6,7 @@
 
 ## 목표
 
-이 모듈은 **선택 모듈**입니다. Azure App Service의 **Easy Auth** 기능을 구성하여 코드 수정 없이 Entra ID(구 Azure AD) 로그인 게이트를 활성화합니다. Entra 앱 등록을 생성하고 OAuth 2.0 / OpenID Connect 설정을 App Service에 연결한 뒤, 브라우저에서 인증 흐름을 확인합니다. 건너뛰어도 이후 모듈(10·11·12) 진행에 지장이 없습니다.
+이 모듈은 **선택 모듈**입니다. Azure App Service의 **Easy Auth** 기능을 구성하여 코드 수정 없이 Entra ID(구 Azure AD) 로그인 게이트를 활성화합니다. Entra 앱 등록을 생성하고 OAuth 2.0 / OpenID Connect 설정을 App Service에 연결한 뒤, 브라우저에서 인증 흐름을 확인합니다. 건너뛰어도 이후 모듈(11·12·13) 진행에 지장이 없습니다.
 
 - Entra 앱 등록(`CLIENT_ID`)을 생성하고 리디렉션 URI를 구성합니다.
 - `authV2` 확장으로 Easy Auth를 활성화하여 미인증 요청을 로그인 페이지로 리디렉션합니다.
@@ -22,7 +22,7 @@ flowchart LR
     EA -.->|"OAuth 2.0 / OIDC"| EID["Entra ID<br/>(앱 등록: auth-appsvcworkshop-SUFFIX)"]
 ```
 
-> ⚠️ **이후 선택 모듈(10·11)은 curl 검증을 위해 첫머리에서 Easy Auth를 일시 비활성화합니다.** 해당 모듈 안내에 따라 auth를 껐다 켜십시오. 이 모듈을 마친 뒤에는 [12. 정리](12-cleanup.md)에서 **Entra 앱 등록 삭제 단계(모듈 09 수행자만)**를 잊지 마세요.
+> ⚠️ **이후 선택 모듈(11·12)은 curl 검증을 위해 첫머리에서 Easy Auth를 일시 비활성화합니다.** 해당 모듈 안내에 따라 auth를 껐다 켜십시오. 이 모듈을 마친 뒤에는 [13. 정리](13-cleanup.md)에서 **Entra 앱 등록 삭제 단계(모듈 10 수행자만)**를 잊지 마세요.
 
 ---
 
@@ -102,11 +102,11 @@ az ad app update --id $CLIENT_ID --enable-id-token-issuance true
 CLIENT_SECRET=$(az ad app credential reset --id $CLIENT_ID --display-name easyauth \
   --query password -o tsv)
 
-# 12 정리에서 App Registration을 삭제할 수 있도록 Client ID를 출력합니다.
-echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 12 정리에서 필요 — 메모
+# 13 정리에서 App Registration을 삭제할 수 있도록 Client ID를 출력합니다.
+echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 13 정리에서 필요 — 메모
 ```
 
-> ⚠️ **`CLIENT_ID` 값을 반드시 메모하십시오.** 모듈 12(정리)에서 Entra 앱 등록을 삭제할 때 이 값이 필요합니다.
+> ⚠️ **`CLIENT_ID` 값을 반드시 메모하십시오.** 모듈 13(정리)에서 Entra 앱 등록을 삭제할 때 이 값이 필요합니다.
 
 > 👁️ `--sign-in-audience AzureADMyOrg`는 이 테넌트 계정만 로그인을 허용합니다. `--enable-id-token-issuance true`는 **필수 설정**입니다 — client secret이 구성된 Easy Auth는 하이브리드 플로(`response_type=code id_token`)를 사용하므로([공식 문서](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization#client-type-and-oauth-flow-behavior)), 앱 등록에서 ID 토큰 발급이 꺼져 있으면 로그인 시 `AADSTS700054` 오류가 발생합니다.
 
@@ -212,4 +212,4 @@ az extension add --name authV2 --upgrade --only-show-errors
 
 ---
 
-이전 모듈: [08. 관찰 가능성](08-observability.md) · 다음 모듈: [10. Sidecar(선택)](10-sidecar-option.md) 또는 [12. 정리](12-cleanup.md)
+이전 선택 모듈: [09. Prewarmed A/B 실험](09-prewarmed-ab.md) 또는 이전 코어 모듈: [08. 관찰 가능성](08-observability.md) · 다음 모듈: [11. Sidecar(선택)](11-sidecar-option.md) 또는 [13. 정리](13-cleanup.md)

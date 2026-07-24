@@ -278,4 +278,4 @@ P0v4가 지원되지 않는 것이 아니라 Azure CLI 2.87.0의 이전 SKU 검�
 
 ---
 
-이전 모듈: [06. 트래픽 분할 · 카나리 배포 · 승격](06-traffic-split-canary.md) · 선택 심화: [07 심화. Prewarmed A/B 실험](07-prewarmed-ab.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)
+이전 모듈: [06. 트래픽 분할 · 카나리 배포 · 승격](06-traffic-split-canary.md) · 선택 모듈: [09. Prewarmed A/B 실험](09-prewarmed-ab.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)

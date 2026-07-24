@@ -124,7 +124,7 @@ def cache():
     except redis.exceptions.RedisError:
         return jsonify(
             cache="unavailable",
-            hint="Redis 사이드카가 없습니다. 모듈 10을 참고하세요.",
+            hint="Redis 사이드카가 없습니다. 모듈 11을 참고하세요.",
             redis_host=host,
         )
 

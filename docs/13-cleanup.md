@@ -9,10 +9,10 @@
 이 모듈에서는 워크숍에서 생성한 모든 Azure 리소스를 삭제하여 불필요한 과금이 발생하지 않도록 정리합니다.
 
 - 리소스 그룹(`$RG`)을 삭제하여 그룹 안의 모든 리소스(App Service Plan, Web App, 배포 슬롯, Log Analytics Workspace, Application Insights)를 한 번에 제거합니다.
-- 리소스 그룹 밖에 존재하는 **Entra ID 앱 등록**은 별도 명령으로 삭제합니다(모듈 09를 수행한 경우에만 해당).
+- 리소스 그룹 밖에 존재하는 **Entra ID 앱 등록**은 별도 명령으로 삭제합니다(모듈 10을 수행한 경우에만 해당).
 - 삭제 완료 여부를 CLI와 포털에서 확인합니다.
 
-> 👁️ RG 삭제만으로 지워지지 않는 것: **Entra 앱 등록**(디렉터리 리소스). 모듈 09를 건너뛴 참가자는 Entra 앱 등록 삭제 단계를 생략해도 됩니다.
+> 👁️ RG 삭제만으로 지워지지 않는 것: **Entra 앱 등록**(디렉터리 리소스). 모듈 10을 건너뛴 참가자는 Entra 앱 등록 삭제 단계를 생략해도 됩니다.
 
 ---
 
@@ -52,16 +52,16 @@ az group delete -n $RG --yes --no-wait
 
 ---
 
-## 2단계 — Entra 앱 등록 삭제(모듈 09 수행자만)
+## 2단계 — Entra 앱 등록 삭제(모듈 10 수행자만)
 
-> 👁️ 모듈 09(Easy Auth)를 건너뛴 경우 이 단계를 생략하고 3단계로 넘어가십시오.
+> 👁️ 모듈 10(Easy Auth)를 건너뛴 경우 이 단계를 생략하고 3단계로 넘어가십시오.
 
-Entra 앱 등록은 리소스 그룹 밖의 디렉터리 리소스이므로 별도로 삭제해야 합니다. 모듈 09에서 메모한 `CLIENT_ID`가 없어도 앱 등록 이름으로 조회하여 삭제할 수 있습니다.
+Entra 앱 등록은 리소스 그룹 밖의 디렉터리 리소스이므로 별도로 삭제해야 합니다. 모듈 10에서 메모한 `CLIENT_ID`가 없어도 앱 등록 이름으로 조회하여 삭제할 수 있습니다.
 
 🟢 **실행**
 
 ```bash
-# Entra 앱 등록은 RG 밖 — 별도 삭제(09를 수행한 경우)
+# Entra 앱 등록은 RG 밖 — 별도 삭제(10을 수행한 경우)
 CLIENT_ID=$(az ad app list --display-name "auth-appsvcworkshop-$SUFFIX" --query "[0].appId" -o tsv)
 az ad app delete --id $CLIENT_ID
 ```
@@ -157,4 +157,4 @@ az group list --query "[?starts_with(name,'rg-appsvcworkshop')]"
 
 ---
 
-이전 모듈: [11. (선택) Auto-heal & 진단](11-autoheal-option.md) · [처음으로](../README.md)
+이전 모듈: [12. (선택) Auto-heal & 진단](12-autoheal-option.md) · [처음으로](../README.md)
