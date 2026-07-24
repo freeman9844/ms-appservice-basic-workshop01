@@ -137,13 +137,15 @@ az webapp restart -g $RG -n $APP
 az webapp sitecontainers list -g $RG -n $APP -o table
 ```
 
-📋 **예상 출력**
+📋 **예상 출력 (예시)**
 
 ```
-Name    Image                                                      IsMain
-------  ---------------------------------------------------------  --------
-redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
+AuthType    CreatedTime                 Image                                              IsMain    LastModifiedTime            Name    ResourceGroup
+----------  --------------------------  -------------------------------------------------  --------  --------------------------  ------  -------------------------
+Anonymous   2026-07-24T02:24:37.850000  mcr.microsoft.com/mirror/docker/library/redis:7.2  False     2026-07-24T02:24:37.850000  redis   rg-appsvcworkshop-<SUFFIX>
 ```
+
+> 👁️ `Name`이 `redis`, `IsMain`이 `False`, `Image`가 지정한 MCR 미러 이미지인지 확인합니다. `CreatedTime`·`LastModifiedTime`은 실행 시점에 따라 다릅니다.
 
 ---
 
@@ -209,12 +211,12 @@ az webapp auth update -g $RG -n $APP --enabled true
 az webapp sitecontainers list -g $RG -n $APP -o table
 ```
 
-📋 **예상 출력**
+📋 **예상 출력 (예시)**
 
 ```
-Name    Image                                                      IsMain
-------  ---------------------------------------------------------  --------
-redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
+AuthType    CreatedTime                 Image                                              IsMain    LastModifiedTime            Name    ResourceGroup
+----------  --------------------------  -------------------------------------------------  --------  --------------------------  ------  -------------------------
+Anonymous   2026-07-24T02:24:37.850000  mcr.microsoft.com/mirror/docker/library/redis:7.2  False     2026-07-24T02:24:37.850000  redis   rg-appsvcworkshop-<SUFFIX>
 ```
 
 ### /cache 동작 확인
