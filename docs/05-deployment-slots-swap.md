@@ -185,7 +185,7 @@ v1
 
 ```bash
 # 같은 swap 명령을 한 번 더 실행하면 두 슬롯 내용이 다시 뒤바뀌며 production은 즉시 v1로 복원됩니다.
-# 이어서 production URL로 복구를 확인하고, staging URL은 이후 확인 시 v2가 유지된 상태여야 합니다.
+# 이어지는 요청은 기존 명령 그대로 production URL만 다시 확인하여 복구된 v1 응답을 검증합니다.
 az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production
 curl -s $APP_URL/api/info | jq -r .version    # v1
 ```
