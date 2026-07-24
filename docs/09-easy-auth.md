@@ -10,7 +10,6 @@
 
 - Entra 앱 등록(`CLIENT_ID`)을 생성하고 리디렉션 URI를 구성합니다.
 - `authV2` 확장으로 Easy Auth를 활성화하여 미인증 요청을 로그인 페이지로 리디렉션합니다.
-- `/.auth/me` 내장 엔드포인트에서 클레임 JSON을 확인합니다.
 - **코드 수정 없이** 플랫폼이 앞단에서 인증을 처리하는 Easy Auth 구조를 이해합니다.
 - 모듈 종료 상태: **Entra 로그인 게이트 활성**.
 
@@ -124,11 +123,10 @@ az webapp auth microsoft update -g $RG -n $APP \
   --client-id $CLIENT_ID --client-secret "$CLIENT_SECRET" \
   --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" --yes
 az webapp auth update -g $RG -n $APP --enabled true \
-  --action RedirectToLoginPage --redirect-provider azureActiveDirectory \
-  --token-store true
+  --action RedirectToLoginPage --redirect-provider azureActiveDirectory
 ```
 
-> 👁️ `az webapp auth config-version upgrade`는 새 Web App의 기본 인증 설정(v1)을 authV2 스키마로 업그레이드합니다. 이 명령 없이 `az webapp auth microsoft update`를 실행하면 `Cannot use auth v2 commands when the app is using auth v1` 오류가 발생합니다. `--action RedirectToLoginPage`는 미인증 요청을 자동으로 로그인 페이지로 리디렉션합니다. `--redirect-provider azureActiveDirectory`는 여러 공급자 중 기본 공급자를 Entra ID로 지정합니다. `--token-store true`는 로그인 시 획득한 토큰을 플랫폼에 저장하는 **Token Store**를 활성화합니다 — 3단계의 `/.auth/me` 클레임 확인에 필요하며, 비활성 상태면 로그인은 되지만 `/.auth/me`가 빈 배열(`[]`)을 반환합니다. 설정이 App Service에 전파되기까지 수십 초가 소요될 수 있습니다.
+> 👁️ `az webapp auth config-version upgrade`는 새 Web App의 기본 인증 설정(v1)을 authV2 스키마로 업그레이드합니다. 이 명령 없이 `az webapp auth microsoft update`를 실행하면 `Cannot use auth v2 commands when the app is using auth v1` 오류가 발생합니다. `--action RedirectToLoginPage`는 미인증 요청을 자동으로 로그인 페이지로 리디렉션합니다. `--redirect-provider azureActiveDirectory`는 여러 공급자 중 기본 공급자를 Entra ID로 지정합니다. 설정이 App Service에 전파되기까지 수십 초가 소요될 수 있습니다.
 
 🟢 **실행** — 설정 전파 후 HTTP 상태 코드를 확인합니다(전파가 완료되지 않았으면 30초 대기 후 재시도).
 
@@ -156,23 +154,13 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 
 ![Entra 로그인 후 표시되는 권한 동의 화면 — auth-appsvcworkshop 앱이 기본 프로필 조회 권한을 요청](images/09-entra-consent.png)
 
-> 👁️ 동의 화면의 "View your basic profile" 권한은 Easy Auth가 `/.auth/me`에서 사용자 클레임을 표시하기 위해 필요한 최소 권한입니다. "이 애플리케이션은 Microsoft에서 게시하지 않았습니다" 문구는 방금 생성한 워크숍용 앱 등록이므로 정상입니다.
+> 👁️ 동의 화면의 "View your basic profile" 권한은 Easy Auth가 로그인 사용자의 기본 프로필 클레임을 받기 위해 필요한 최소 권한입니다. "이 애플리케이션은 Microsoft에서 게시하지 않았습니다" 문구는 방금 생성한 워크숍용 앱 등록이므로 정상입니다.
 
 🖼️ **예상 화면** — 로그인 후 `$APP_URL`의 Flask 앱 페이지가 정상 표시됩니다.
 
 ![로그인 성공 후 Flask 앱 화면이 정상 표시됨 — slot: production, 인스턴스 ID 확인 가능](images/09-app-after-login.png)
 
 > 👁️ 화면의 버전(v1/v2)과 배경색은 모듈 진행 상태에 따라 다를 수 있습니다. 로그인 게이트를 통과해 앱 페이지가 표시되는 것이 검증 포인트입니다.
-
-🟢 **브라우저에서 아래 URL에 접속**하여 클레임 JSON을 확인합니다.
-
-```
-$APP_URL/.auth/me
-```
-
-🖼️ **예상 화면** — 최상위가 **배열(`[ { … } ]`)** 인 JSON이 반환되며, 배열 안 객체에 `user_id`, `id_token`, `user_claims` 배열(이름·이메일·테넌트 ID 등)이 포함됩니다.
-
-> ⚠️ **빈 배열(`[]`)이 반환되는 경우** — 2단계의 `--token-store true`가 누락되었거나 설정 전파 전에 로그인한 경우입니다. 2단계 명령을 다시 실행한 뒤, 브라우저에서 `$APP_URL/.auth/logout`으로 로그아웃하고 재로그인 후 다시 확인하십시오.
 
 ---
 
