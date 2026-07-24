@@ -273,14 +273,24 @@ capacity=1 latest_cpu=<값 또는 pending>
 🟢 **실행**
 
 ```bash
-# 약 180초 CPU 부하를 백그라운드로 보내면서 30초마다 worker 수와 CPU를 확인합니다.
+# hey 실행 결과를 저장할 파일을 사용자 홈 디렉터리에 지정합니다.
 LOAD_OUT="$HOME/autoscale-load-$SUFFIX.out"
+
+# /load?sec=20을 순차적으로 9회 호출하여 약 180초 동안 CPU 부하를 만듭니다.
+# -n 9는 전체 요청 수, -c 1은 동시 요청 수, -t 40은 요청별 timeout(초)입니다.
+# 관찰 명령을 동시에 실행할 수 있도록 hey는 백그라운드(&)에서 실행합니다.
 hey -n 9 -c 1 -t 40 "$APP_URL/load?sec=20" > "$LOAD_OUT" &
+
+# 백그라운드 hey 프로세스 ID를 저장하고 scale-out 관찰 여부를 0으로 초기화합니다.
 HEY_PID=$!
 SCALED_OUT=0
 
+# 최대 12회, 30초 간격으로 약 6분 동안 Plan 상태를 관찰합니다.
 for attempt in $(seq 1 12); do
+  # 현재 App Service Plan에 할당된 worker 수를 조회합니다.
   CAPACITY=$(az appservice plan show -g "$RG" -n "$PLAN" --query sku.capacity -o tsv)
+
+  # 최근 10분의 Plan CpuPercentage 1분 Average 중 최신 값을 조회합니다.
   CPU=$(az monitor metrics list \
     --resource "$PLAN_ID" \
     --metric CpuPercentage \
@@ -289,30 +299,42 @@ for attempt in $(seq 1 12); do
     --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
     --query "value[0].timeseries[0].data[?average != null] | [-1].average" \
     -o tsv)
+
+  # 관찰 횟수와 현재 worker 수, 최신 CPU 값을 한 줄로 출력합니다.
+  # Azure Monitor 값이 아직 수집되지 않았으면 CPU는 pending으로 표시됩니다.
   printf '관찰 %02d/12 capacity=%s latest_cpu=%s\n' \
     "$attempt" "$CAPACITY" "${CPU:-pending}"
 
+  # worker 수가 1보다 크면 scale-out 성공으로 기록하고 관찰 루프를 종료합니다.
   if [ "$CAPACITY" -gt 1 ]; then
     SCALED_OUT=1
     break
   fi
+
+  # 마지막 관찰이 아니라면 다음 조회 전 30초 동안 기다립니다.
   if [ "$attempt" -lt 12 ]; then
     sleep 30
   fi
 done
 
+# 백그라운드 hey가 끝날 때까지 기다리고 종료 코드를 저장합니다.
 if wait "$HEY_PID"; then
   HEY_STATUS=0
 else
   HEY_STATUS=$?
 fi
 
+# scale-out 관찰 여부와 hey 종료 코드를 요약하여 출력합니다.
 echo "scaled_out=$SCALED_OUT hey_exit=$HEY_STATUS"
+
+# hey 결과에 HTTP 200 응답이 정확히 9개 있고 Error distribution이 없는지 확인합니다.
 if ! grep -Eq '^[[:space:]]+\[200\][[:space:]]+9 responses' "$LOAD_OUT" ||
   grep -q '^Error distribution:' "$LOAD_OUT"; then
   echo "9개의 HTTP 200 응답을 확인하지 못했습니다: $LOAD_OUT" >&2
   HEY_STATUS=1
 fi
+
+# scale-out을 관찰하지 못했거나 hey 요청이 실패했다면 실습을 실패로 종료합니다.
 if [ "$SCALED_OUT" -ne 1 ] || [ "$HEY_STATUS" -ne 0 ]; then
   echo "scale-out 관찰 실패: 트러블슈팅을 확인하세요." >&2
   false
