@@ -145,3 +145,28 @@ def test_managed_instrumentation_portal_guidance_is_explicit():
     assert "**Failures**" in observability_main
     assert "**Transaction search**" in observability_main
     assert "**Application map**" in observability_main
+
+
+def test_step_four_uses_application_insights_investigation_images():
+    image_references = {
+        "08-application-insights-performance.png": (
+            "![Application Insights Performance에서 GET /slow의 "
+            "3초 응답 시간 확인]"
+        ),
+        "08-application-insights-failures.png": (
+            "![Application Insights Failures에서 "
+            "GET /workshop-not-found 404 확인]"
+        ),
+        "08-application-insights-transaction-details.png": (
+            "![Application Insights End-to-end transaction details에서 "
+            "GET /slow 요청 확인]"
+        ),
+        "08-application-insights-application-map.png": (
+            "![Application Insights Application map에서 "
+            "App Service 애플리케이션 노드 확인]"
+        ),
+    }
+
+    for filename, alt_text in image_references.items():
+        assert f"{alt_text}(images/{filename})" in OBSERVABILITY
+        assert (ROOT / "docs/images" / filename).is_file()
