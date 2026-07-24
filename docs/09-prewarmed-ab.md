@@ -1,4 +1,4 @@
-# 07 심화. Prewarmed A/B 실험
+# 09. (선택) Prewarmed A/B 실험
 
 > 🔬 **선택 심화 모듈** — 기본 [07. 자동 스케일](07-autoscale.md)을 완료한 뒤 수행하는 것을 권장합니다. 이 모듈을 건너뛰어도 08 모듈을 진행할 수 있습니다.
 
@@ -595,7 +595,7 @@ jq -r '
   .[] | ["Prewarmed=1", .instance, .started_at, .first_seen_at, (.first_response_age | tostring)] | @tsv
 ' "$PREWARM_OBSERVATIONS"
 
-echo "[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
+echo "[09] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 ```
 
 📋 **예상 출력** (2026-07-23 리허설 예시)
@@ -610,7 +610,7 @@ Prewarmed=1	69e069d8	2026-07-23T03:29:35Z	2026-07-23T03:30:00Z	25
 Prewarmed=1	9b19c4d6	2026-07-23T03:29:36Z	2026-07-23T03:30:01Z	25
 Prewarmed=1	8e0e812d	2026-07-23T03:30:13Z	2026-07-23T03:30:52Z	39
 Prewarmed=1	5d90b391	2026-07-23T03:30:21Z	2026-07-23T03:30:52Z	31
-[07] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다.
+[09] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다.
 ```
 
 🟢 **실행 — 관찰 범위 요약**
