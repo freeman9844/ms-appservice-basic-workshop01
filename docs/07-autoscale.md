@@ -1,31 +1,31 @@
-# 07. 자동 스케일(Automatic Scaling · 부하 확장/축소)
+# 07. Autoscale(CPU 규칙 기반 확장)
 
-> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요) · 🖼️ **예상 화면** = 브라우저/포털 스크린샷 참고
+> 🟢 **실행** = 직접 입력·수행 · 👁️ **예시** = 눈으로만(개념/발췌) · 📋 **예상 출력** = 비교용(입력 불필요)
 
 ---
 
 ## 목표
 
-이 모듈에서는 Azure App Service **Automatic Scaling**을 활성화하고, production 앱에 HTTP 부하를 보내 인스턴스가 확장되는 흐름을 `InstanceCount` 메트릭으로 관찰합니다.
+이 모듈에서는 App Service Plan에 **Azure Monitor Autoscale**을 구성하고, production 앱의 `/load`에 CPU 부하를 보내 규칙 기반 scale-out을 관찰합니다.
 
-- Automatic Scaling과 규칙 기반 Azure Monitor Autoscale의 차이를 이해합니다.
-- Maximum burst 5, Always ready 1, Prewarmed 1을 설정합니다.
-- `hey` 부하 전후의 `InstanceCount`를 비교합니다.
-- 부하 종료 후 scale-in이 비동기로 진행되는 특성을 이해합니다.
-- 모듈 종료 상태: **Automatic Scaling 활성, Always ready 1, Prewarmed 1, Maximum burst 5, production = v2**.
+- Automatic Scaling을 비활성화하고 Plan 수준 Autoscale을 활성화합니다.
+- minimum 1, default 1, maximum 3의 capacity를 설정합니다.
+- `CpuPercentage > 20%` scale-out과 `< 10%` scale-in 규칙을 만듭니다.
+- `/load?sec=20` CPU 부하 중 Plan worker 수가 1보다 커지는 것을 확인합니다.
+- scale-in 규칙은 설정값만 확인하고 실제 축소 대기는 생략합니다.
+- 모듈 종료 상태: **Autoscale 활성(min 1·default 1·max 3), Automatic Scaling 비활성, production = v2**.
 
 ---
 
 ## 0단계 — (선택) 변수 재설정
 
 > ⏭️ **06 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
-> 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
-> `SUFFIX`는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
+> 새 터미널 세션을 열었거나 Cloud Shell이 재시작된 경우 `SUFFIX`에 02에서 사용한 값을 입력합니다.
 
 🟢 **실행**
 
 ```bash
-# 이전 모듈의 리소스 변수를 복원하고 Web App URL을 조회합니다.
+# 이전 모듈의 리소스 변수와 Autoscale 설정 이름을 복원합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -33,118 +33,91 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
-APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
+APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
+PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 echo "APP_URL=$APP_URL"
+echo "AUTOSCALE=$AUTOSCALE"
 ```
 
 📋 **예상 출력**
 
 ```text
 APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
+AUTOSCALE=autoscale-appsvcworkshop-<SUFFIX>
 ```
 
 ---
 
-## 👁️ Automatic Scaling과 규칙 기반 Autoscale 비교
+## 👁️ Azure Monitor Autoscale
 
-Azure App Service에서 수평 스케일을 구현하는 대표적인 두 방식은 다음과 같습니다.
+Autoscale은 App Service Plan 전체에 적용되는 규칙 기반 수평 확장 방식입니다.
 
-| 비교 항목 | **Automatic Scaling** | **규칙 기반 Azure Monitor Autoscale** |
-|---|---|---|
-| 플랜 요건 | Premium v2–v4 | Standard 이상 |
-| 스케일 트리거 | HTTP 요청 부하를 플랫폼이 판단 | CPU·메모리·큐 등의 메트릭 규칙 |
-| 설정 방식 | 최솟값·최댓값 중심 | 임계값·증감량·쿨다운 직접 설정 |
-| 콜드스타트 완화 | Prewarmed 버퍼 사용 | 새 인스턴스 워밍 시간 발생 |
+| 항목 | 이번 실습 |
+|---|---|
+| 적용 범위 | App Service Plan 전체 |
+| 트리거 | Plan의 `CpuPercentage` |
+| capacity | minimum 1, default 1, maximum 3 |
+| scale-out | CPU > 20%, 1분 Average, +1 |
+| scale-in | CPU < 10%, 1분 Average, -1 |
+| cooldown | 양방향 1분 |
 
-> 👁️ Automatic Scaling은 HTTP 트래픽을 기준으로 동작하며 배포 슬롯 트래픽을 지원하지 않습니다. 이 모듈에서는 staging URL이 아니라 production URL인 `$APP_URL`에 부하를 보냅니다.
+20%와 10%는 짧은 워크숍에서 변화를 쉽게 관찰하기 위한 실습 전용 값입니다. 운영 환경에서는 실제 트래픽과 처리 지연을 측정하여 임계값과 평가 시간을 결정해야 합니다.
 
-## 👁️ Automatic Scaling 설정값 요약
-
-| 설정 | 역할 | 이 모듈의 값 |
-|---|---|---|
-| Always ready | 트래픽이 없어도 유지할 최소 인스턴스 수 | 1 |
-| Prewarmed | 다음 HTTP scale-out에 준비할 워밍 버퍼 수 | 1 |
-| Maximum burst | HTTP 부하에 따라 확장할 최대 인스턴스 수 | 5 |
-
-> 👁️ 세 값은 Automatic Scaling 전용 설정입니다. 적용 범위, 확장 흐름, 비용과 Prewarmed 비교는 [09. Prewarmed A/B 실험](09-prewarmed-ab.md)에서 자세히 다룹니다.
+> 👁️ HTTP 트래픽을 플랫폼이 직접 판단하는 **Automatic Scaling**은 [09. Automatic Scaling · Prewarmed A/B 실험](09-prewarmed-ab.md)에서 다룹니다. App Service Plan에는 두 방식 중 하나만 활성화합니다.
 
 ---
 
-## 1단계 — Automatic Scaling 활성화
+## 1단계 — Autoscale 방식으로 전환
 
 > 👁️ **진입 상태** — production = v2(초록 `#16a34a`), staging = v1(파랑 `#2563eb`), 라우팅 0%. 이 상태는 06 모듈에서 만들어졌습니다.
 
 🟢 **실행**
 
 ```bash
-# P0v4 Plan과 Web App에 Automatic Scaling 설정을 적용합니다.
-PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
-APP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
-
+# Automatic Scaling을 끄고 Plan을 worker 1개로 맞춥니다.
 az rest --method patch \
   --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":false}}' \
   --output none &&
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none &&
+
+# 재실행 시 같은 이름의 profile과 rule이 중복되지 않도록 기존 설정을 제거합니다.
+EXISTING_AUTOSCALE_ID=$(az monitor autoscale list -g "$RG" \
+  --query "[?name=='$AUTOSCALE'].id | [0]" -o tsv)
+if [ -n "$EXISTING_AUTOSCALE_ID" ]; then
+  az monitor autoscale delete --ids "$EXISTING_AUTOSCALE_ID"
+fi &&
+
 az webapp config appsettings delete -g "$RG" -n "$APP" \
   --setting-names STARTUP_DELAY_SECONDS --output none &&
-echo "Automatic Scaling 설정 완료"
+echo "Autoscale 전환 준비 완료"
 ```
 
-> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 말고 `$RG`, `$PLAN`, `$APP`와 오류 메시지를 확인한 뒤 다시 실행합니다.
+> ⚠️ 완료 메시지가 보이지 않으면 다음 단계로 진행하지 않습니다.
 
-🟢 **실행 — 앱 준비 상태 확인**
-
-```bash
-# 설정 변경으로 앱이 재시작된 경우 /health가 정상화될 때까지 기다립니다.
-for attempt in $(seq 1 18); do
-  if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
-    break
-  fi
-  if [ "$attempt" -eq 18 ]; then
-    echo "Automatic Scaling 설정 후 /health 확인 실패" >&2
-    false
-  fi
-  sleep 5
-done
-```
-
-🟢 **실행 — 설정값 확인**
+🟢 **실행 — 전환 상태 확인**
 
 ```bash
-# Plan과 Web App에 적용된 Automatic Scaling 값을 확인합니다.
 az rest --method get \
   --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
+  --query "properties.{automaticScaling:elasticScaleEnabled}"
 
-az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+az appservice plan show -g "$RG" -n "$PLAN" \
+  --query "{capacity:sku.capacity}" -o json
 ```
 
 📋 **예상 출력**
 
 ```json
 {
-  "automaticScaling": true,
-  "maximumBurst": 5
+  "automaticScaling": false
 }
 {
-  "alwaysReady": 1,
-  "prewarmed": 1
+  "capacity": 1
 }
 ```
 
-> 👁️ Azure Portal의 Web App에서 **App Service plan > Scale out**로 이동하면 **Scale out method = Automatic**, **Maximum burst = 5**, **Always ready instances = 1**을 확인할 수 있습니다. Prewarmed 값은 위 CLI 조회로 확인합니다.
-
-🖼️ **예상 화면 — Azure Portal Automatic Scaling 설정**
-
-![Azure Portal Scale out 화면에서 Automatic, Maximum burst 5, Always ready instances 1 확인](images/07-automatic-scaling-portal.png)
-
-> 👁️ P0v4에서 ARM REST API를 사용하는 이유: Azure CLI 2.87.0의 `az appservice plan update --elastic-scale`과 `az webapp update --minimum-elastic-instance-count`에는 Premium v2/v3만 허용하는 이전 SKU 검증 로직이 남아 있습니다. `az rest`는 같은 공식 ARM 속성을 직접 설정하여 이 CLI 제한을 우회합니다.
+> 👁️ P0v4에서 ARM REST API를 사용하는 이유: Azure CLI 2.87.0의 `az appservice plan update --elastic-scale`에는 Premium v2/v3만 허용하는 이전 SKU 검증 로직이 남아 있습니다. `az rest`는 같은 공식 ARM 속성을 직접 설정하여 이 CLI 제한을 우회합니다.
 
 ---
 
@@ -155,7 +128,7 @@ az rest --method get \
 🟢 **실행**
 
 ```bash
-# 동시 HTTP 요청 부하를 만들 hey 도구를 설치합니다.
+# CPU 부하를 반복 호출할 hey 도구를 설치합니다.
 go install github.com/rakyll/hey@latest
 export PATH=$HOME/go/bin:$PATH
 hey 2>&1 | head -1
@@ -169,93 +142,228 @@ Usage: hey [options...] <url>
 
 ---
 
-## 3단계 — 부하 전 인스턴스 기준값 확인
+## 3단계 — Autoscale profile과 CPU 규칙 생성
 
 🟢 **실행**
 
 ```bash
-# 최근 10분의 Automatic Scaling 인스턴스 수를 확인합니다.
-az monitor metrics list \
-  --resource "$APP_ID" \
-  --metric InstanceCount \
+# Plan의 인스턴스 범위와 CPU 기반 scale-out·scale-in 규칙을 만듭니다.
+az monitor autoscale create \
+  -g "$RG" \
+  -n "$AUTOSCALE" \
+  --resource "$PLAN_ID" \
+  --min-count 1 \
+  --max-count 3 \
+  --count 1 \
+  --output none &&
+
+az monitor autoscale rule create \
+  -g "$RG" \
+  --autoscale-name "$AUTOSCALE" \
+  --condition "CpuPercentage > 20 avg 1m" \
+  --scale out 1 \
+  --cooldown 1 \
+  --output none &&
+
+az monitor autoscale rule create \
+  -g "$RG" \
+  --autoscale-name "$AUTOSCALE" \
+  --condition "CpuPercentage < 10 avg 1m" \
+  --scale in 1 \
+  --cooldown 1 \
+  --output none &&
+echo "Autoscale profile과 CPU 규칙 생성 완료"
+```
+
+> 👁️ scale-out과 scale-in 규칙을 쌍으로 구성해야 최대 또는 최소 인스턴스 수에 도달한 뒤 한 방향으로만 고정되는 상태를 피할 수 있습니다.
+
+---
+
+## 4단계 — Autoscale 설정값 확인
+
+🟢 **실행**
+
+```bash
+# capacity와 두 CPU 규칙의 조건·방향·cooldown을 확인합니다.
+az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
+  --query "profiles[0].{capacity:capacity,rules:rules[].{metric:metricTrigger.metricName,operator:metricTrigger.operator,threshold:metricTrigger.threshold,timeWindow:metricTrigger.timeWindow,direction:scaleAction.direction,value:scaleAction.value,cooldown:scaleAction.cooldown}}" \
+  -o json
+```
+
+📋 **예상 출력**
+
+```json
+{
+  "capacity": {
+    "default": "1",
+    "maximum": "3",
+    "minimum": "1"
+  },
+  "rules": [
+    {
+      "cooldown": "PT1M",
+      "direction": "Increase",
+      "metric": "CpuPercentage",
+      "operator": "GreaterThan",
+      "threshold": 20,
+      "timeWindow": "PT1M",
+      "value": "1"
+    },
+    {
+      "cooldown": "PT1M",
+      "direction": "Decrease",
+      "metric": "CpuPercentage",
+      "operator": "LessThan",
+      "threshold": 10,
+      "timeWindow": "PT1M",
+      "value": "1"
+    }
+  ]
+}
+```
+
+> ⚠️ capacity나 두 규칙이 예상값과 다르면 부하를 실행하지 말고 1단계부터 다시 수행합니다.
+
+---
+
+## 5단계 — 부하 전 기준 상태 확인
+
+🟢 **실행**
+
+```bash
+# 앱 준비 상태, 현재 worker 수와 최신 CPU 평균을 확인합니다.
+curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'
+
+CAPACITY=$(az appservice plan show -g "$RG" -n "$PLAN" --query sku.capacity -o tsv)
+CPU=$(az monitor metrics list \
+  --resource "$PLAN_ID" \
+  --metric CpuPercentage \
   --interval PT1M \
   --aggregation Average \
   --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
-  -o table
+  --query "value[0].timeseries[0].data[?average != null] | [-1].average" \
+  -o tsv)
+printf 'capacity=%s latest_cpu=%s\n' "$CAPACITY" "${CPU:-pending}"
 ```
 
-> 👁️ 부하 전 최신 값은 보통 `1`입니다. Azure Monitor의 1분 집계와 수집 지연 때문에 최신 분의 행이 아직 없을 수 있습니다.
+📋 **예상 출력**
+
+```text
+capacity=1 latest_cpu=<값 또는 pending>
+```
+
+> 👁️ Azure Monitor 수집 지연 때문에 최신 CPU 값이 아직 없으면 `pending`으로 표시될 수 있습니다.
 
 ---
 
-## 4단계 — HTTP 부하로 scale-out 유도
+## 6단계 — CPU 부하로 scale-out 관찰
 
 🟢 **실행**
 
 ```bash
-# 180초 동안 production API에 HTTP 부하를 보냅니다.
-hey -z 180s -c 100 -q 10 "$APP_URL/api/info"
-```
+# 180초 CPU 부하를 백그라운드로 보내면서 30초마다 worker 수와 CPU를 확인합니다.
+LOAD_OUT="$HOME/autoscale-load-$SUFFIX.out"
+hey -z 180s -c 10 "$APP_URL/load?sec=20" > "$LOAD_OUT" &
+HEY_PID=$!
+SCALED_OUT=0
 
-> 👁️ `-z 180s`는 실행 시간, `-c 100`은 최대 동시 worker 수, `-q 10`은 worker당 초당 요청 수입니다.
-
----
-
-## 5단계 — scale-out 메트릭 확인
-
-🟢 **실행**
-
-```bash
-# 부하가 포함된 최근 10분의 인스턴스 수 변화를 조회합니다.
-az monitor metrics list \
-  --resource "$APP_ID" \
-  --metric InstanceCount \
-  --interval PT1M \
-  --aggregation Average \
-  --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
-  -o table
-```
-
-> 👁️ `count`가 1보다 큰 행이 있으면 부하 중 scale-out된 것입니다. 이 값은 1분 구간의 Average이므로 `3`이 정확히 같은 시점의 인스턴스 3개를 뜻하지는 않습니다. Azure Portal에서는 **Automatic Scaling Instance Count**라는 이름으로 같은 메트릭을 확인할 수 있습니다.
-
----
-
-## 6단계 — scale-in 흐름 관찰
-
-🟢 **실행**
-
-```bash
-# 부하 종료 후 60초 간격으로 최대 5회 인스턴스 수를 확인합니다.
-for attempt in $(seq 1 5); do
-  echo "scale-in 관찰 ${attempt}/5"
-  az monitor metrics list \
-    --resource "$APP_ID" \
-    --metric InstanceCount \
+for attempt in $(seq 1 12); do
+  CAPACITY=$(az appservice plan show -g "$RG" -n "$PLAN" --query sku.capacity -o tsv)
+  CPU=$(az monitor metrics list \
+    --resource "$PLAN_ID" \
+    --metric CpuPercentage \
     --interval PT1M \
     --aggregation Average \
     --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-    --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
-    -o table
-  if [ "$attempt" -lt 5 ]; then
-    sleep 60
+    --query "value[0].timeseries[0].data[?average != null] | [-1].average" \
+    -o tsv)
+  printf '관찰 %02d/12 capacity=%s latest_cpu=%s\n' \
+    "$attempt" "$CAPACITY" "${CPU:-pending}"
+
+  if [ "$CAPACITY" -gt 1 ]; then
+    SCALED_OUT=1
+    break
+  fi
+  if [ "$attempt" -lt 12 ]; then
+    sleep 30
   fi
 done
+
+if wait "$HEY_PID"; then
+  HEY_STATUS=0
+else
+  HEY_STATUS=$?
+fi
+
+echo "scaled_out=$SCALED_OUT hey_exit=$HEY_STATUS"
+if [ "$SCALED_OUT" -ne 1 ] || [ "$HEY_STATUS" -ne 0 ]; then
+  echo "scale-out 관찰 실패: 트러블슈팅을 확인하세요." >&2
+  false
+fi
 ```
 
-> 👁️ Automatic Scaling의 축소 판단은 보통 부하 종료 후 5~10분 이후부터 시작됩니다. 이 반복 안에 최신 값이 `1`로 내려오면 scale-in을 관찰한 것입니다. 아직 2 이상이어도 설정 실패가 아니며 다음 모듈로 진행할 수 있습니다.
+📋 **예상 출력**
+
+```text
+관찰 01/12 capacity=1 latest_cpu=pending
+...
+관찰 04/12 capacity=2 latest_cpu=95.4
+scaled_out=1 hey_exit=0
+```
+
+> 👁️ CPU와 worker 수는 Azure Monitor 수집 및 Autoscale 평가 지연 때문에 즉시 변하지 않을 수 있습니다. 관찰 중 capacity가 2 또는 3으로 증가하면 성공입니다.
+
+---
+
+## 7단계 — scale-in 규칙 확인
+
+🟢 **실행**
+
+```bash
+# 실제 축소를 기다리지 않고 scale-in 규칙이 정확한지만 확인합니다.
+az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
+  --query "profiles[0].rules[?scaleAction.direction=='Decrease'].{metric:metricTrigger.metricName,operator:metricTrigger.operator,threshold:metricTrigger.threshold,timeWindow:metricTrigger.timeWindow,value:scaleAction.value,cooldown:scaleAction.cooldown}" \
+  -o table
+```
+
+> 👁️ 이 핸즈온에서는 축소 완료를 기다리지 않습니다. CPU가 10% 아래로 1분 유지되면 Autoscale이 cooldown을 적용하며 최소 1까지 줄입니다.
 
 ---
 
 ## 트러블슈팅
 
-### 인스턴스가 확장되지 않음
+### scale-out이 관찰되지 않음
 
-- 부하 URL이 staging `$STG_URL`이 아니라 production `$APP_URL`인지 확인합니다.
-- Plan의 `automaticScaling`이 `true`, `maximumBurst`가 `5`인지 확인합니다.
-- 앱의 `alwaysReady`와 `prewarmed`가 각각 `1`인지 확인합니다.
-- Azure Monitor의 1분 집계와 수집 지연을 고려해 부하 종료 후 다시 조회합니다.
+```bash
+# Autoscale 활성 상태와 전체 profile을 확인합니다.
+az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
+  --query "{enabled:enabled,profile:profiles[0]}" -o json
+
+# 최근 CPU 메트릭을 확인합니다.
+az monitor metrics list \
+  --resource "$PLAN_ID" \
+  --metric CpuPercentage \
+  --interval PT1M \
+  --aggregation Average \
+  --start-time "$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
+  -o table
+
+# CPU 부하 엔드포인트가 정상 응답하는지 짧게 확인합니다.
+curl -fsS "$APP_URL/load?sec=2" | jq .
+```
+
+- 최신 CPU가 20%를 넘지 않았다면 동일한 `hey` 명령의 `-z`만 `300s`로 늘려 한 번 재시도합니다.
+- Autoscale target이 Web App이 아니라 `$PLAN_ID`인지 확인합니다.
+- profile이 enabled이고 scale-out 규칙이 `CpuPercentage > 20 avg 1m`인지 확인합니다.
+
+### Autoscale rule 생성 실패
+
+```bash
+az monitor metrics list-definitions \
+  --resource "$PLAN_ID" \
+  --query "[?name.value=='CpuPercentage'].{name:name.value,displayName:name.localizedValue}" \
+  -o table
+```
 
 ### hey 설치 실패
 
@@ -265,10 +373,6 @@ export PATH=$HOME/go/bin:$PATH
 command -v hey
 ```
 
-### Premium V2/V3 SKU만 지원한다는 오류
-
-P0v4가 지원되지 않는 것이 아니라 Azure CLI 2.87.0의 이전 SKU 검증 로직 때문에 발생합니다. 이 문서의 `az rest` 명령을 사용하고 `az appservice plan update --elastic-scale`과 `az webapp update --minimum-elastic-instance-count`는 실행하지 않습니다.
-
 ---
 
-이전 모듈: [06. 트래픽 분할 · 카나리 배포 · 승격](06-traffic-split-canary.md) · 선택 모듈: [09. Prewarmed A/B 실험](09-prewarmed-ab.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)
+이전 모듈: [06. 트래픽 분할 · 카나리 배포 · 승격](06-traffic-split-canary.md) · 선택 모듈: [09. Automatic Scaling · Prewarmed A/B 실험](09-prewarmed-ab.md) · 다음 코어 모듈: [08. 관찰 가능성](08-observability.md)
