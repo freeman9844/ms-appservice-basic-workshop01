@@ -101,7 +101,9 @@ Always ready를 높이면 트래픽이 적을 때도 유지하는 기본 용량�
 
 ```bash
 # 07의 Autoscale을 제거하고 App Service Automatic Scaling으로 전환합니다.
+# 뒤의 Trial A/B에서 부하 생성기 `hey`를 바로 찾을 수 있도록 Go 설치 경로를 PATH에 포함합니다.
 export PATH=$HOME/go/bin:$PATH
+# `hey`가 없으면 실험 단계가 실행되지 않으므로, 전환 작업을 더 진행하기 전에 선행 설치 누락을 즉시 중단합니다.
 if ! command -v hey >/dev/null 2>&1; then
   echo "hey가 없습니다. 07의 hey 설치 단계를 먼저 수행하세요." >&2
   false
@@ -113,11 +115,13 @@ if [ "$(az monitor autoscale list -g "$RG" --query "length([?name=='$AUTOSCALE']
   false
 else
   # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (6) 참고).
+  # Plan 리소스 수준에서 Automatic Scaling을 켜고, burst 시 최대로 늘릴 worker 수를 5로 고정합니다.
   az rest --method patch \
     --uri "${PLAN_ID}?api-version=2024-11-01" \
     --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
     --output none &&
 
+  # Web App config 수준에서 Always-ready 1개와 Prewarmed 1개를 설정합니다. 이 값들은 위 Plan 설정과 별도입니다.
   az rest --method patch \
     --uri "${APP_ID}/config/web?api-version=2024-11-01" \
     --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
@@ -134,6 +138,7 @@ fi
 🟢 **실행 — 앱 준비와 전환 상태 확인**
 
 ```bash
+# 전환 직후 재시작된 앱이 다시 healthy 상태가 될 때까지 최대 18회, 5초 간격으로 확인합니다.
 for attempt in $(seq 1 18); do
   if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
     break
@@ -157,6 +162,7 @@ AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
 printf '%s\n%s\n' "$PLAN_SCALE" "$APP_SCALE"
 echo "Autoscale setting count=$AUTOSCALE_COUNT"
 
+# Plan에서 Automatic Scaling=true와 maximumBurst=5, Web App에서 Always-ready=1과 Prewarmed=1, Plan 대상 Autoscale 0개를 모두 만족해야 전환 완료입니다.
 if ! jq -e '.automaticScaling == true and .maximumBurst == 5' \
     >/dev/null <<< "$PLAN_SCALE" ||
   ! jq -e '.alwaysReady == 1 and .prewarmed == 1' \
@@ -199,13 +205,19 @@ Autoscale setting count=0
 
 ```bash
 # A/B 결과 파일 경로를 준비하고 앱 시작 지연을 적용합니다.
+# AB_DIR는 두 Trial의 hey 출력과 observer JSON을 한곳에 모으는 공통 작업 디렉터리입니다.
 AB_DIR="${AB_DIR:-$HOME/appservice-prewarmed-ab}"
 mkdir -p "$AB_DIR"
+# Trial A에서 새 instance 응답 타임라인을 저장할 JSON 경로입니다.
 NO_PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-0-observations.json"
+# Trial B에서 새 instance 응답 타임라인을 저장할 JSON 경로입니다.
 PREWARM_OBSERVATIONS="$AB_DIR/prewarmed-1-observations.json"
+# Trial A의 InstanceCount 시계열을 저장할 JSON 경로입니다.
 NO_PREWARM_METRICS="$AB_DIR/prewarmed-0-instance-count.json"
+# Trial B의 InstanceCount 시계열을 저장할 JSON 경로입니다.
 PREWARM_METRICS="$AB_DIR/prewarmed-1-instance-count.json"
 
+# 새 worker의 started_at 대비 첫 응답 시차를 더 분명히 보기 위해 앱 시작 지연을 20초로 키웁니다.
 az webapp config appsettings set -g "$RG" -n "$APP" \
   --settings STARTUP_DELAY_SECONDS=20 --output none &&
 echo "STARTUP_DELAY_SECONDS=20 설정 완료"
@@ -219,18 +231,23 @@ echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 
 ```bash
 # 앱 재시작 후 /health가 정상화될 때까지 기다립니다.
+# 성공 전제로 시작하지 않고, 첫 정상 응답을 보기 전까지는 실패 상태를 유지합니다.
 HEALTH_CHECK_STATUS=1
+# 최대 18회까지 5초 간격으로 readiness를 polling합니다.
 for attempt in $(seq 1 18); do
   HEALTH_BODY=$(curl -fsS --max-time 10 "$APP_URL/health" 2>/dev/null || true)
   if jq -e '.status == "ok"' >/dev/null 2>&1 <<< "$HEALTH_BODY"; then
     printf '%s\n' "$HEALTH_BODY"
+    # `/health`가 정상화되면 상태를 0으로 바꾸고 더 이상 기다리지 않습니다.
     HEALTH_CHECK_STATUS=0
     break
   fi
   if [ "$attempt" -lt 18 ]; then
+    # 마지막 시도 전까지는 5초 쉬어 재시작 중인 앱에 준비 시간을 줍니다.
     sleep 5
   fi
 done
+# 끝까지 정상 응답이 없으면 이후 Trial을 막고 복원 후 중단하도록 명시적으로 실패시킵니다.
 if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
   echo "/health 확인 실패: 5단계의 복원 명령을 실행하세요." >&2
   false
@@ -279,9 +296,12 @@ az webapp show -g "$RG" -n "$APP" \
 
 ```bash
 # Trial A 전에 새 메트릭 두 개가 연속으로 단일 인스턴스 상태인지 확인합니다.
+# 게이트 시작 시각 이후의 메트릭만 조회해 Trial A 이전에 쌓인 오래된 샘플을 제외합니다.
 GATE_START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 SINGLE_INSTANCE_READY=0
+# 최대 30회, 30초 간격으로 fresh 1분 Average 샘플이 두 번 연속 1인지 확인합니다.
 for attempt in $(seq 1 30); do
+  # GATE_START_TIME 이후에 수집된 fresh InstanceCount 1분 Average 마지막 두 값을 TSV로 가져옵니다.
   LAST_TWO_COUNTS=$(az monitor metrics list \
     --resource "$APP_ID" \
     --metric InstanceCount \
@@ -293,15 +313,18 @@ for attempt in $(seq 1 30); do
   printf 'Trial A single-instance gate %02d/30 counts=[%s]\n' \
     "$attempt" "${LAST_TWO_COUNTS:-pending}"
 
+  # 마지막 두 샘플이 모두 1이어야 바로 직전 두 집계 구간이 연속으로 단일 인스턴스였음을 뜻합니다.
   if [ "$LAST_TWO_COUNTS" = "1.0 1.0" ]; then
     SINGLE_INSTANCE_READY=1
     break
   fi
   if [ "$attempt" -lt 30 ]; then
+    # 아직 기준 상태가 아니면 다음 30초 polling 지점까지 기다립니다.
     sleep 30
   fi
 done
 
+# 30번 안에 최신 두 샘플이 모두 1이 되지 않으면 Trial A를 시작하지 않고 실패합니다.
 if [ "$SINGLE_INSTANCE_READY" -ne 1 ]; then
   echo "Trial A 최신 단일 인스턴스 메트릭 2회 연속 확인 실패" >&2
   false
@@ -329,21 +352,27 @@ Trial A single-instance gate 05/30 counts=[1.0 1.0]
 
 ```bash
 # 시험 A의 부하, 인스턴스 관찰, InstanceCount 메트릭 수집을 동시에 실행합니다.
+# 현재 응답 중인 기준 instance를 먼저 확보해야 observer가 이후에 보이는 "새 instance"만 분리해 기록할 수 있습니다.
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
   echo "Prewarmed=0 기준 instance: $BASELINE_INSTANCE"
 
+  # metric observer를 먼저 백그라운드 시작해 이 시점부터의 trial_started_at과 InstanceCount 변화를 Trial A 전용 JSON에 기록합니다.
   python3 "$REPO_DIR/scripts/observe_scaling_metric.py" \
     --resource "$APP_ID" \
     --duration 240 \
     --poll-interval 30 \
     --output "$NO_PREWARM_METRICS" &
+  # METRIC_PID는 Trial A metric observer를 독립적으로 wait하고 종료 코드를 따로 받기 위한 PID입니다.
   METRIC_PID=$!
 
+  # hey는 동일한 Trial A burst 부하를 독립 백그라운드 작업으로 보내고 요약 출력은 전용 .out 파일에 남깁니다.
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
     > "$AB_DIR/hey-burst-0.out" &
+  # HEY_PID는 observer 실패 시 hey만 정리하거나, 나중에 hey exit code를 정확히 wait하기 위한 PID입니다.
   HEY_PID=$!
 
+  # instance observer는 foreground에서 새 instance의 started_at/first_seen_at을 수집하고, 위 두 백그라운드 작업과 동시에 독립적으로 진행됩니다.
   if python3 "$REPO_DIR/scripts/observe_instances.py" \
     --url "$APP_URL/api/info" \
     --baseline-instance "$BASELINE_INSTANCE" \
@@ -355,12 +384,16 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     OBSERVER_STATUS=0
   else
     OBSERVER_STATUS=$?
+    # foreground observer가 실패하면 남아 있는 hey와 metric observer를 각 PID로 정리해 Trial A 산출물이 어긋나지 않게 합니다.
     kill "$HEY_PID" "$METRIC_PID" 2>/dev/null || true
   fi
 
+  # 먼저 hey 종료를 기다려 부하 생성 성공 여부의 exit code를 별도로 캡처합니다.
   if wait "$HEY_PID"; then HEY_STATUS=0; else HEY_STATUS=$?; fi
+  # 그다음 metric observer 종료를 기다려 메트릭 수집 성공 여부의 exit code를 별도로 캡처합니다.
   if wait "$METRIC_PID"; then METRIC_STATUS=0; else METRIC_STATUS=$?; fi
 
+  # observer·hey·metric 세 프로세스가 모두 0이어야 같은 Trial A 창의 응답/부하/메트릭 결과가 모두 유효합니다.
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
     echo "시험 A 실패: 세 결과를 비교하지 말고 5단계의 복원 명령을 실행하세요." >&2
@@ -407,9 +440,12 @@ observer exit=0, hey exit=0, metric exit=0
 
 ```bash
 # Trial B 전에 새 메트릭 두 개가 연속으로 단일 인스턴스 상태인지 확인합니다.
+# 게이트 시작 시각 이후의 메트릭만 조회해 Trial A에서 남은 오래된 샘플을 Trial B 판단에서 제외합니다.
 GATE_START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 SINGLE_INSTANCE_READY=0
+# 최대 30회, 30초 간격으로 fresh 1분 Average 샘플이 두 번 연속 1인지 확인합니다.
 for attempt in $(seq 1 30); do
+  # GATE_START_TIME 이후에 수집된 fresh InstanceCount 1분 Average 마지막 두 값을 TSV로 가져옵니다.
   LAST_TWO_COUNTS=$(az monitor metrics list \
     --resource "$APP_ID" \
     --metric InstanceCount \
@@ -421,15 +457,18 @@ for attempt in $(seq 1 30); do
   printf 'Trial B single-instance gate %02d/30 counts=[%s]\n' \
     "$attempt" "${LAST_TWO_COUNTS:-pending}"
 
+  # 마지막 두 샘플이 모두 1이어야 Trial A 부하가 끝난 뒤 다시 단일 인스턴스로 돌아왔다고 판단합니다.
   if [ "$LAST_TWO_COUNTS" = "1.0 1.0" ]; then
     SINGLE_INSTANCE_READY=1
     break
   fi
   if [ "$attempt" -lt 30 ]; then
+    # 아직 기준 상태가 아니면 다음 30초 polling 지점까지 기다립니다.
     sleep 30
   fi
 done
 
+# 30번 안에 최신 두 샘플이 모두 1이 되지 않으면 Trial B를 시작하지 않고 실패합니다.
 if [ "$SINGLE_INSTANCE_READY" -ne 1 ]; then
   echo "Trial B 최신 단일 인스턴스 메트릭 2회 연속 확인 실패" >&2
   false
@@ -482,21 +521,27 @@ az webapp show -g "$RG" -n "$APP" \
 
 ```bash
 # 시험 B에 시험 A와 동일한 부하와 관찰 조건을 적용합니다.
+# Trial B에서도 현재 기준 instance를 먼저 읽어 이후 observer 결과를 "새 instance"로 한정합니다.
 if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   jq -er 'select((.instance | type) == "string" and (.instance | test("\\S"))) | .instance'); then
   echo "Prewarmed=1 기준 instance: $BASELINE_INSTANCE"
 
+  # metric observer를 먼저 백그라운드 시작해 이 시점부터의 trial_started_at과 InstanceCount 변화를 Trial B 전용 JSON에 기록합니다.
   python3 "$REPO_DIR/scripts/observe_scaling_metric.py" \
     --resource "$APP_ID" \
     --duration 240 \
     --poll-interval 30 \
     --output "$PREWARM_METRICS" &
+  # METRIC_PID는 Trial B metric observer를 독립적으로 wait하고 종료 코드를 따로 받기 위한 PID입니다.
   METRIC_PID=$!
 
+  # hey는 Trial B의 동일한 burst 부하를 독립 백그라운드 작업으로 보내고 출력은 별도 .out 파일에 남깁니다.
   hey -z 180s -c 100 -q 10 "$APP_URL/api/info" \
     > "$AB_DIR/hey-burst-1.out" &
+  # HEY_PID는 hey만 정리하거나 hey exit code를 정확히 wait하기 위한 PID입니다.
   HEY_PID=$!
 
+  # instance observer는 foreground에서 새 instance 타임라인을 수집하며 hey·metric observer와 동시에 독립적으로 실행됩니다.
   if python3 "$REPO_DIR/scripts/observe_instances.py" \
     --url "$APP_URL/api/info" \
     --baseline-instance "$BASELINE_INSTANCE" \
@@ -508,12 +553,16 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
     OBSERVER_STATUS=0
   else
     OBSERVER_STATUS=$?
+    # foreground observer가 실패하면 남아 있는 hey와 metric observer를 각 PID로 정리합니다.
     kill "$HEY_PID" "$METRIC_PID" 2>/dev/null || true
   fi
 
+  # 먼저 hey 종료를 기다려 Trial B 부하 생성 성공 여부의 exit code를 따로 캡처합니다.
   if wait "$HEY_PID"; then HEY_STATUS=0; else HEY_STATUS=$?; fi
+  # 이어서 metric observer 종료를 기다려 Trial B 메트릭 수집 성공 여부의 exit code를 따로 캡처합니다.
   if wait "$METRIC_PID"; then METRIC_STATUS=0; else METRIC_STATUS=$?; fi
 
+  # 세 exit code가 모두 0이어야 Trial B의 observer·hey·metric 결과를 서로 비교할 수 있습니다.
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
     echo "시험 B 실패: 세 결과를 비교하지 말고 5단계의 복원 명령을 실행하세요." >&2
