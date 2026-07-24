@@ -160,6 +160,7 @@ flowchart LR
 | sed 치환·스왑 문제 | [05 배포 슬롯 & 스왑](docs/05-deployment-slots-swap.md#트러블슈팅) |
 | 트래픽 분할 비율이 안 보임 | [06 슬롯 트래픽 분할 카나리](docs/06-traffic-split-canary.md#트러블슈팅) |
 | 인스턴스가 확장/축소되지 않음 | [07 자동 스케일](docs/07-autoscale.md#트러블슈팅) |
+| Prewarmed A/B 관찰·복원이 실패함 | [07 심화 Prewarmed A/B](docs/07-prewarmed-ab.md#트러블슈팅) |
 | KQL 쿼리 결과 없음 | [08 관찰 가능성](docs/08-observability.md#트러블슈팅) |
 | 로그인 리디렉션이 안 됨 | [09 (선택) 인증 (Easy Auth)](docs/09-easy-auth.md#트러블슈팅) |
 | `/cache`가 계속 unavailable | [10 (선택) 사이드카 컨테이너](docs/10-sidecar-option.md#트러블슈팅) |

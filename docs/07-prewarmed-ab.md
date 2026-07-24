@@ -8,16 +8,14 @@
 
 ## 목표
 
-이 선택 심화 모듈에서는 Azure App Service **Automatic scaling**(탄력 스케일)을 활성화하고, `hey` 부하와 `observe_instances.py`로 같은 앱의 새 instance가 **언제 시작되고 언제 실제 응답에 처음 투입되는지**를 관찰합니다. 단일 실행의 승패를 가르기보다 `Prewarmed=0`과 `Prewarmed=1`에서 보이는 외부 증거를 기록하고 해석합니다.
+이 선택 심화 모듈에서는 기본 07에서 활성화한 Azure App Service **Automatic Scaling**과 `hey`, 두 Python observer를 사용하여 새 instance가 **언제 시작되고 언제 실제 응답에 처음 투입되는지**를 관찰합니다. 단일 실행의 승패를 가르기보다 `Prewarmed=0`과 `Prewarmed=1`에서 보이는 외부 증거를 기록하고 해석합니다.
 
-- App Service 플랜을 Elastic scale 모드로 전환하고 최대 5 인스턴스로 설정합니다.
+- 기본 07의 Automatic Scaling 상태(Maximum burst 5, Always ready 1, Prewarmed 1)를 확인합니다.
 - `STARTUP_DELAY_SECONDS=20`으로 새 프로세스의 시작 준비 시간을 눈에 보이게 만듭니다.
 - `/api/info`의 `started_at`과 새 instance의 최초 관찰 시각으로 `first_response_age`를 계산합니다.
 - `Prewarmed=0`과 `Prewarmed=1`의 인스턴스별 시작·투입 타임라인을 비교하되, 한 번의 실행에서 어느 쪽이 반드시 더 빠르다고 판정하지 않습니다.
 - `InstanceCount` 메트릭으로 시험 전·시험 사이의 단일 인스턴스 기준 상태를 확인합니다.
-- 시험 사이와 종료 후 인스턴스가 다시 1개 기준 상태로 축소됨을 확인합니다.
-- **Automatic scaling** 방식과 **규칙 기반(Azure Monitor autoscale)** 방식의 개념 차이를 이해합니다.
-- **Always-ready instances**와 **Prewarmed instances**의 역할과 비용 차이를 이해합니다.
+- 종료 전에 Prewarmed 1과 시작 지연 없음으로 복원하고 전체 Automatic Scaling 상태를 확인합니다.
 - 모듈 종료 상태: **Automatic scaling 활성(Always ready 1·Prewarmed 1·Maximum burst 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
 
 ## 공통 상태 — 항상 실행
@@ -62,96 +60,23 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 
 ---
 
-## 👁️ Automatic scaling vs 규칙 기반 — 개념 비교
+## 선행 조건 확인
 
-Azure App Service에서 수평 스케일(인스턴스 수 조정)을 구현하는 방법은 두 가지입니다.
+> 👁️ Automatic Scaling의 개념과 설정 방법은 [07. 자동 스케일](07-autoscale.md)을 참고하세요. 이 심화 실험은 기본 07의 종료 상태인 **Automatic Scaling 활성, Maximum burst 5, Always ready 1, Prewarmed 1**에서 시작합니다.
 
-| 비교 항목 | **Automatic scaling** | **규칙 기반(Azure Monitor autoscale)** |
-|---|---|---|
-| 플랜 요건 | **Premium v2–v4** | Standard 이상 |
-| 스케일 트리거 | **HTTP 요청 부하** — 플랫폼이 자동 판단 | CPU·메모리·큐 길이 등 **메트릭 + 직접 규칙** |
-| 설정 복잡도 | 최솟값·최댓값만 지정 | 규칙(임계값·방향·증감량·쿨다운) 직접 작성 |
-| 관리 주체 | **플랫폼 완전 관리** | 운영자가 규칙 유지·보수 |
-| 콜드스타트 방지 | Prewarmed 인스턴스를 버퍼로 준비 | 스케일아웃 후 새 인스턴스 워밍 시간 존재 |
-| ACA 대응 | ACA **HTTP 스케일링**(KEDA HTTP Add-on) | ACA **사용자 정의 KEDA 스케일러** |
-
-> 👁️ Automatic scaling은 **HTTP 트래픽**을 기준으로 동작하며 배포 슬롯으로 분기된 트래픽에는 적용되지 않습니다. 이 모듈에서는 production URL인 `$APP_URL`에 직접 부하를 보냅니다.
-
----
-
-## 👁️ Always-ready와 Prewarmed 인스턴스 이해
-
-두 설정 모두 앱 시작 지연을 줄이지만 목적과 트래픽 처리 여부가 다릅니다.
-
-| 구분 | **Always-ready instances** | **Prewarmed instances** |
-|---|---|---|
-| **역할** | 앱이 항상 사용할 수 있도록 유지하는 최소 실행 인스턴스 | 다음 scale-out에 빠르게 투입하기 위한 워밍 버퍼 |
-| **평상시 트래픽 처리** | 처리함 | 버퍼 상태에서는 일반 트래픽을 처리하지 않음 |
-| **CLI 설정** | `--minimum-elastic-instance-count` | `--prewarmed-instance-count` |
-| **기본/권장값** | 최소 1 | 기본 1, 대부분의 워크로드에서 1 권장 |
-| **부하 증가 시** | 먼저 요청을 처리 | 활성 인스턴스로 전환되고 새로운 Prewarmed 버퍼가 준비됨 |
-| **부하 감소 시** | 설정된 최소 수까지 유지 | 더 이상 필요하지 않으면 버퍼가 해제됨 |
-
-이 워크숍의 설정(`Always ready = 1`, `Prewarmed = 1`)은 다음과 같이 동작합니다.
-
-```mermaid
-flowchart LR
-    IDLE["낮은 트래픽<br/>Always ready 1개"] -->|"HTTP 부하 증가"| BUFFER
-    BUFFER["Always ready 인스턴스가 활성화되면<br/>Prewarmed 1개를 버퍼로 할당"]
-    BUFFER -->|"추가 처리 용량 필요"| SCALE
-    SCALE["Prewarmed가 활성 인스턴스로 전환<br/>다음 Prewarmed 버퍼 준비"]
-    SCALE -->|"반복"| MAX["Maximum burst 5까지 확장"]
-    MAX -->|"트래픽 감소 후 5–10분부터 검토"| IDLE
-```
-
-### Always-ready instances
-
-- 앱 수준의 **최소 인스턴스 수**입니다. 트래픽이 적거나 없어도 이 수보다 아래로 축소되지 않습니다.
-- 이 모듈의 `--minimum-elastic-instance-count 1`은 production 앱이 최소 한 인스턴스에서 계속 실행됨을 의미합니다.
-- 값을 높이면 기본 처리 용량과 가용성은 증가하지만, 항상 실행되는 인스턴스가 늘어 비용도 증가합니다.
-
-### Prewarmed instances
-
-- HTTP 부하가 증가할 때 새로운 인스턴스를 처음부터 부팅하는 지연을 줄이기 위한 **워밍 버퍼**입니다.
-- Always-ready 인스턴스가 트래픽을 처리하기 시작하면 Prewarmed 인스턴스가 할당됩니다. 부하가 더 증가하면 이 버퍼가 활성 인스턴스로 전환되고, 최대 확장 한도에 도달할 때까지 다음 버퍼가 준비됩니다.
-- `--prewarmed-instance-count 1`은 “활성 인스턴스 외에 항상 1개를 무조건 실행”한다는 의미가 아닙니다. 앱이 유휴 상태라 Prewarmed 버퍼가 할당되지 않은 동안에는 해당 버퍼 비용이 발생하지 않습니다.
-- Prewarmed 인스턴스가 실제로 할당된 시점부터는 초 단위로 과금됩니다. Maximum burst에 도달하면 그 이상 Prewarmed 또는 활성 인스턴스가 추가되지 않습니다.
-
-### Maximum burst와의 관계
-
-`--max-elastic-worker-count 5`는 Plan이 HTTP 부하에 따라 확장할 수 있는 **Maximum burst** 상한입니다. Always-ready와 활성화된 Prewarmed 인스턴스를 포함한 확장은 이 범위 안에서 이루어집니다. 백엔드 데이터베이스처럼 함께 확장되지 않는 의존성이 있다면 상한을 낮춰 과부하를 방지할 수 있습니다.
-
----
-
-## 1단계 — Automatic scaling 활성화
-
-> 👁️ **진입 상태** — production = v2(초록 `#16a34a`), staging = v1(파랑 `#2563eb`), 라우팅 0%. 이 상태는 06 모듈에서 만들어졌습니다.
-
-🟢 **실행** — App Service Plan과 Web App 리소스 ID를 조회한 뒤 ARM REST API로 Automatic scaling을 설정합니다.
+🟢 **실행**
 
 ```bash
-# P0v4 Plan에서 Automatic scaling과 최대 탄력 인스턴스 수를 설정합니다.
-# Web App의 Always-ready 및 Prewarmed 인스턴스 수를 초기화합니다.
-PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
-APP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
+# 리소스 ID와 hey 경로를 복원하고 기본 07의 종료 상태를 확인합니다.
+export PATH=$HOME/go/bin:$PATH
+PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
+APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 
-az rest --method patch \
-  --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
-  --output none &&
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none &&
-echo "Automatic scaling 설정 완료"
-```
+if ! command -v hey >/dev/null 2>&1; then
+  echo "hey가 없습니다. 기본 07의 2단계를 먼저 수행하세요." >&2
+  false
+fi
 
-> ⚠️ 오류가 출력되거나 `Automatic scaling 설정 완료`가 보이지 않으면 다음 단계로 진행하지 말고, `$RG`, `$PLAN`, `$APP` 값과 오류 메시지를 확인한 뒤 1단계를 다시 실행합니다.
-
-🟢 **실행** — 설정값을 조회합니다.
-
-```bash
-# Plan과 Web App에 적용된 Automatic scaling 값을 확인합니다.
 az rest --method get \
   --uri "${PLAN_ID}?api-version=2024-11-01" \
   --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}"
@@ -174,53 +99,11 @@ az rest --method get \
 }
 ```
 
-> 👁️ CLI로 설정한 Automatic scaling은 **Azure Portal 관리 콘솔**에서도 확인할 수 있습니다.
-> Web App 리소스에서 **App Service plan > Scale out**로 이동하면 **Scale out method = Automatic**, **Maximum burst = 5**, **Always ready instances = 1**을 확인할 수 있습니다.
-> 이 화면에는 Prewarmed 값이 표시되지 않으므로 `Prewarmed = 1`은 위 CLI 조회 결과로 확인합니다.
-
-🖼️ **예상 화면 — Azure Portal Automatic scaling 설정**
-
-![Azure Portal Scale out 화면에서 Automatic, Maximum burst 5, Always ready instances 1 확인](images/07-automatic-scaling-portal.png)
-
-> 👁️ ARM 속성 `elasticScaleEnabled`는 Plan을 Automatic scaling 모드로 전환합니다. `maximumElasticWorkerCount`는 Maximum burst, `minimumElasticInstanceCount`는 Always-ready 최소값, `preWarmedInstanceCount`는 HTTP 확장 시 준비할 워밍 버퍼 수입니다.
-> Plan PATCH의 `sku` 객체는 ARM API가 기존 P0v4 Plan을 갱신할 때 요구하는 현재 SKU 정보이며, Plan의 가격 계층을 변경하지 않습니다.
->
-> Automatic scaling을 활성화하면 기존 앱의 **ARR Affinity(세션 선호도)**가 자동으로 비활성화됩니다. 특정 인스턴스에 요청을 고정하지 않아야 여러 인스턴스로 트래픽을 고르게 분산할 수 있기 때문입니다.
->
-> **배포 슬롯 트래픽은 자동 스케일 대상이 아닙니다.** 공식 문서 기준 Automatic scaling은 배포 슬롯 트래픽을 지원하지 않으므로, 이 모듈의 부하 테스트는 항상 production URL(`$APP_URL`)로 수행합니다. staging 슬롯(`$STG_URL`)에 부하를 보내도 스케일 아웃이 발생하지 않습니다([공식 문서](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)).
->
-> **P0v4에서 ARM REST API를 사용하는 이유:** 공식 App Service 기능은 Premium v4를 지원하지만, Azure CLI 2.87.0의 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령에는 Premium v2/v3만 허용하는 이전 SKU 검증 로직이 남아 있습니다. `az rest`는 같은 공식 ARM 속성을 직접 설정하여 이 CLI 제한을 우회합니다.
+> ⚠️ 값이 다르면 심화 실험을 시작하지 말고 기본 07의 1단계를 다시 수행하세요.
 
 ---
 
-## 2단계 — hey 부하 도구 설치
-
-> 👁️ Cloud Shell에는 Go가 사전 설치되어 있으므로 `go install`로 hey를 빌드합니다. (`hey`의 S3 사전 빌드 바이너리 배포는 현재 접근 불가 상태입니다.)
-
-🟢 **실행**
-
-```bash
-# 동시 요청 부하를 만들 hey 도구를 설치합니다.
-go install github.com/rakyll/hey@latest
-export PATH=$HOME/go/bin:$PATH
-```
-
-설치가 완료되면 실행 가능한지 확인합니다(`hey`는 `--version` 플래그가 없으므로 도움말 출력으로 확인).
-
-```bash
-# hey가 현재 셸에서 실행 가능한지 확인합니다.
-hey 2>&1 | head -1
-```
-
-📋 **예상 출력**
-
-```
-Usage: hey [options...] <url>
-```
-
----
-
-## 3단계 — Prewarmed A/B 비교 준비
+## 1단계 — Prewarmed A/B 비교 준비
 
 이번 모듈의 관찰 포인트는 “어느 시험이 더 빨랐는가”가 아니라 **새 instance가 시작된 뒤 실제 응답에 처음 보일 때까지 어떤 타임라인이 관찰되는가**입니다. 먼저 `STARTUP_DELAY_SECONDS=20`으로 새 프로세스의 시작 준비 시간을 키우고, 동일한 burst 부하에서 `Prewarmed=0`과 `Prewarmed=1`의 관찰 결과를 같은 형식으로 기록합니다.
 
@@ -244,7 +127,7 @@ az webapp config appsettings set -g "$RG" -n "$APP" \
 echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 ```
 
-> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 6단계의 **모듈 기본 상태로 복원** 명령을 실행합니다.
+> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 4단계의 **모듈 기본 상태로 복원** 명령을 실행합니다.
 
 🟢 **실행 — 앱 준비 상태 확인**
 
@@ -265,7 +148,7 @@ for attempt in $(seq 1 18); do
   fi
 done
 if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
-  echo "/health 확인 실패: 6단계의 복원 명령을 실행하세요." >&2
+  echo "/health 확인 실패: 4단계의 복원 명령을 실행하세요." >&2
   false
 fi
 ```
@@ -279,7 +162,7 @@ fi
 > 👁️ `InstanceCount`는 시험 시작 전·시험 사이의 단일 인스턴스 기준 상태 확인과 각 시험 중의 capacity 변화 관찰에 사용합니다. 시험 중에는 30초마다 조회해 1분 단위 값을 별도 JSON으로 저장하고, `observe_instances.py`는 실제 응답에 나타난 새 instance의 `started_at`, `first_seen_at`, `first_response_age`를 기록합니다.
 
 
-## 4단계 — 시험 A: Prewarmed=0
+## 2단계 — 시험 A: Prewarmed=0
 
 먼저 `Prewarmed=0`에서 새 instance가 언제 처음 응답에 투입되는지 관찰합니다.
 
@@ -372,16 +255,16 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
 
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 A 실패: 세 결과를 비교하지 말고 6단계의 복원 명령을 실행하세요." >&2
+    echo "시험 A 실패: 세 결과를 비교하지 말고 4단계의 복원 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 A 기준 instance 확인 실패: 6단계의 모듈 기본 상태로 복원 명령을 실행한 뒤 3단계부터 다시 시도하세요." >&2
+  echo "시험 A 기준 instance 확인 실패: 4단계의 모듈 기본 상태로 복원 명령을 실행한 뒤 1단계부터 다시 시도하세요." >&2
   false
 fi
 ```
 
-> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 6단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 3단계부터 다시 시도합니다.
+> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 4단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 1단계부터 다시 시도합니다.
 
 📋 **예상 출력** (2026-07-23 리허설 예시)
 
@@ -406,7 +289,7 @@ observer exit=0, hey exit=0, metric exit=0
 
 ---
 
-## 5단계 — scale-in 게이트 후 시험 B: Prewarmed=1
+## 3단계 — scale-in 게이트 후 시험 B: Prewarmed=1
 
 시험 B는 반드시 시험 A의 부하가 끝나고 새 기준 상태가 다시 확보된 뒤 시작합니다. `Prewarmed=1`로 되돌린 뒤에도 별도의 prime 부하나 `InstanceCount>=2` 버퍼 게이트는 두지 않고, 같은 burst에서 새 instance의 최초 응답 나이를 다시 관찰합니다.
 
@@ -461,7 +344,7 @@ az rest --method get \
 > 3. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 부하 조건은 동일하게 유지하고 출력 파일만 `$AB_DIR/hey-burst-1.out`을 사용합니다.
 > 4. `METRIC_PID=$!`와 `HEY_PID=$!`에 Trial B의 백그라운드 프로세스 PID를 저장하여 뒤의 `wait`가 각 완료와 종료 상태를 정확히 확인하도록 합니다.
 > 5. `observe_instances.py`는 기준 instance를 제외하고 `--concurrency 30`, `--request-timeout 5` 조건으로 새 instance를 관찰합니다. 결과는 Trial B 전용 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
-> 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 6단계 복원 명령을 실행합니다.
+> 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 4단계 복원 명령을 실행합니다.
 
 ```bash
 # 시험 B에 시험 A와 동일한 부하와 관찰 조건을 적용합니다.
@@ -499,11 +382,11 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
 
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 B 실패: 세 결과를 비교하지 말고 6단계의 복원 명령을 실행하세요." >&2
+    echo "시험 B 실패: 세 결과를 비교하지 말고 4단계의 복원 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 B 기준 instance 확인 실패: 6단계의 복원 명령을 실행한 뒤 결과를 해석하지 말고 3단계부터 다시 시도하세요." >&2
+  echo "시험 B 기준 instance 확인 실패: 4단계의 복원 명령을 실행한 뒤 결과를 해석하지 말고 1단계부터 다시 시도하세요." >&2
   false
 fi
 ```
@@ -533,7 +416,7 @@ observer exit=0, hey exit=0, metric exit=0
 
 ---
 
-## 6단계 — 결과 해석 및 정리
+## 4단계 — 기본 상태 복원 및 결과 해석
 
 두 시험 모두에서 새 instance가 관찰되었다면, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
 
@@ -542,26 +425,93 @@ observer exit=0, hey exit=0, metric exit=0
 > ⚠️ 결과 해석보다 먼저 복원합니다. 이후 명령이 실패하더라도 다음 모듈이 동일한 상태에서 시작할 수 있도록 Prewarmed를 1로 되돌리고 인위적인 시작 지연을 삭제합니다.
 
 ```bash
-# 심화 실험의 임시 설정을 제거하고 기본 07 종료 상태로 복원합니다.
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none &&
-az webapp config appsettings delete -g "$RG" -n "$APP" \
-  --setting-names STARTUP_DELAY_SECONDS --output none &&
+# 리소스 ID를 다시 조회하여 새 Cloud Shell에서도 복원할 수 있게 합니다.
+RESTORE_STATUS=0
+if APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv); then
+  if ! az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+    --output none
+  then
+    echo "Prewarmed 복원 실패" >&2
+    RESTORE_STATUS=1
+  fi
+else
+  echo "Web App 리소스 ID 조회 실패" >&2
+  RESTORE_STATUS=1
+fi
+
+# Prewarmed PATCH 결과와 관계없이 인위적인 시작 지연 삭제를 시도합니다.
+if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
+  --setting-names STARTUP_DELAY_SECONDS --output none
+then
+  echo "STARTUP_DELAY_SECONDS 삭제 실패" >&2
+  RESTORE_STATUS=1
+fi
+
+if [ "$RESTORE_STATUS" -ne 0 ]; then
+  echo "복원 실패: 트러블슈팅의 복구 명령을 실행하세요." >&2
+  false
+fi
+
 echo "Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료"
 ```
 
 🟢 **실행 — 복원 상태 확인**
 
 ```bash
-# 복원된 인스턴스 설정과 앱 준비 상태를 확인합니다.
-az rest --method get \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+# Automatic Scaling 전체 설정과 시작 지연 삭제를 단언합니다.
+VERIFY_STATUS=0
+if ! PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv); then
+  echo "Plan 리소스 ID 조회 실패" >&2
+  VERIFY_STATUS=1
+fi
+if ! APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv); then
+  echo "Web App 리소스 ID 조회 실패" >&2
+  VERIFY_STATUS=1
+fi
 
-az webapp config appsettings list -g "$RG" -n "$APP" \
-  --query "[?name=='STARTUP_DELAY_SECONDS']"
+if [ "$VERIFY_STATUS" -eq 0 ]; then
+  if ! PLAN_STATE=$(az rest --method get \
+    --uri "${PLAN_ID}?api-version=2024-11-01" -o json)
+  then
+    echo "Plan 상태 조회 실패" >&2
+    VERIFY_STATUS=1
+  fi
+  if ! APP_STATE=$(az rest --method get \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" -o json)
+  then
+    echo "Web App 상태 조회 실패" >&2
+    VERIFY_STATUS=1
+  fi
+fi
+
+if ! STARTUP_DELAY_COUNT=$(az webapp config appsettings list -g "$RG" -n "$APP" \
+  --query "length([?name=='STARTUP_DELAY_SECONDS'])" -o tsv)
+then
+  echo "앱 설정 조회 실패" >&2
+  VERIFY_STATUS=1
+fi
+
+if [ "$VERIFY_STATUS" -eq 0 ]; then
+  jq '{automaticScaling:.properties.elasticScaleEnabled,maximumBurst:.properties.maximumElasticWorkerCount}' <<< "$PLAN_STATE"
+  jq '{alwaysReady:.properties.minimumElasticInstanceCount,prewarmed:.properties.preWarmedInstanceCount}' <<< "$APP_STATE"
+  echo "STARTUP_DELAY_SECONDS count=$STARTUP_DELAY_COUNT"
+
+  if ! jq -e '.properties.elasticScaleEnabled == true and .properties.maximumElasticWorkerCount == 5' \
+    >/dev/null <<< "$PLAN_STATE" ||
+    ! jq -e '.properties.minimumElasticInstanceCount == 1 and .properties.preWarmedInstanceCount == 1' \
+      >/dev/null <<< "$APP_STATE" ||
+    [ "$STARTUP_DELAY_COUNT" != "0" ]
+  then
+    VERIFY_STATUS=1
+  fi
+fi
+
+if [ "$VERIFY_STATUS" -ne 0 ]; then
+  echo "복원 상태 불일치: 트러블슈팅의 복구 명령을 실행하세요." >&2
+  false
+fi
 
 for attempt in $(seq 1 18); do
   if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
@@ -580,10 +530,14 @@ done
 ```text
 Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료
 {
+  "automaticScaling": true,
+  "maximumBurst": 5
+}
+{
   "alwaysReady": 1,
   "prewarmed": 1
 }
-[]
+STARTUP_DELAY_SECONDS count=0
 {"status":"ok"}
 ```
 
@@ -714,7 +668,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 - 새 Cloud Shell에서 시작했다면 위 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인한 뒤, 0단계에서 `SUFFIX`와 Azure 리소스 변수만 다시 맞춥니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
-- 6단계의 복원 명령을 실행한 뒤, 5단계의 단일 인스턴스 조회 명령으로 최신 행의 `count`가 `1`인지 다시 확인하고 3단계부터 재실행합니다.
+- 4단계의 복원 명령을 실행한 뒤, 3단계의 단일 인스턴스 조회 명령으로 최신 행의 `count`가 `1`인지 다시 확인하고 1단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
 - Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
@@ -732,7 +686,7 @@ az monitor metrics list \
 
 ### (2) 단일 인스턴스로 축소되지 않음
 
-시험 A 뒤 5단계의 단일 인스턴스 조회에서 최신 행의 `count`가 계속 2 이상이면 시험 B를 실행하지 말고, 6단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 3단계부터 재실행하세요.
+시험 A 뒤 3단계의 단일 인스턴스 조회에서 최신 행의 `count`가 계속 2 이상이면 시험 B를 실행하지 말고, 4단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 1단계부터 재실행하세요.
 
 ```bash
 for attempt in $(seq 1 5); do
@@ -750,23 +704,33 @@ done
 
 Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Plan의 다른 앱이 추가 인스턴스를 붙잡고 있어도 지표가 늦게 내려갈 수 있습니다. 공식 동작 기준으로 축소 판단은 보통 부하 종료 후 5–10분 이후부터 시작되므로, 충분히 기다린 뒤 다시 측정합니다.
 
-### 새 instance의 `first_response_age`가 두 시험에서 비슷함
+### (3) 새 instance의 `first_response_age`가 두 시험에서 비슷함
 
 이는 오류가 아닙니다. 이번 실행에서는 준비된 instance가 곧바로 활성화되어 응답 전 대기 구간이 짧았을 수 있습니다. 단일 실행의 총 scale-out 시간만으로 Prewarmed 효과를 단정하지 말고, 인스턴스별 `started_at`과 `first_seen_at`을 관찰 결과로 기록합니다.
 
 ### (4) 복원 명령이 실패함
 
-6단계의 복원 블록이 실패하면 다음 모듈로 넘어가지 말고, 아래 검증 명령으로 설정과 앱 상태를 다시 확인한 뒤 수동으로 복구합니다.
+4단계의 복원 블록이 실패하면 다음 모듈로 넘어가지 말고, 아래 복구 명령을 다시 실행합니다.
 
 ```bash
-az rest --method get \
+# 새 Cloud Shell에서도 복구할 수 있도록 변수와 리소스 ID를 다시 조회합니다.
+SUFFIX=<이전에_메모한_값>
+RG=rg-appsvcworkshop-$SUFFIX
+PLAN=plan-appsvcworkshop-$SUFFIX
+APP=app-appsvcworkshop-$SUFFIX
+APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
+APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
+
+# 두 복구 명령은 서로 독립적으로 실행합니다.
+az rest --method patch \
   --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --query "properties.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}"
+  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+  --output none
 
-az webapp config appsettings list -g "$RG" -n "$APP" \
-  --query "[?name=='STARTUP_DELAY_SECONDS']"
+az webapp config appsettings delete -g "$RG" -n "$APP" \
+  --setting-names STARTUP_DELAY_SECONDS --output none
 
-curl -fsS --max-time 10 "$APP_URL/health"
+# 복구 후 4단계의 "복원 상태 확인" 블록을 다시 실행합니다.
 ```
 
 ### (5) hey 설치 실패
@@ -786,7 +750,7 @@ command -v hey
 ['--minimum-elastic-instance-count', '--prewarmed-instance-count'] are only supported for elastic premium V2/V3 SKUs
 ```
 
-P0v4가 지원되지 않는 것이 아니라 Azure CLI의 SKU 검증 로직이 Premium v4를 아직 포함하지 않아 발생하는 오류입니다. 1단계의 `az rest` 명령을 사용하고, 기존 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령은 실행하지 않습니다.
+P0v4가 지원되지 않는 것이 아니라 Azure CLI의 SKU 검증 로직이 Premium v4를 아직 포함하지 않아 발생하는 오류입니다. 기본 07의 1단계 `az rest` 명령을 사용하고, 기존 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령은 실행하지 않습니다.
 
 ---
 
