@@ -68,8 +68,11 @@ Azure에서 웹앱 가시성을 확보하는 경로는 두 가지입니다.
 
 ```bash
 # App Service의 HTTP·콘솔·플랫폼 로그와 메트릭을 Log Analytics로 전송합니다.
+# WEBAPP_ID는 진단 설정을 부착할 대상 Web App 리소스 ID입니다.
 WEBAPP_ID=$(az webapp show -g $RG -n $APP --query id -o tsv)
+# LAW_ID는 진단 설정이 로그와 메트릭을 보낼 Log Analytics Workspace 대상 리소스 ID입니다.
 LAW_ID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query id -o tsv)
+# AppServiceHTTPLogs는 HTTP 액세스 로그, AppServicePlatformLogs는 Linux 컨테이너/플랫폼 이벤트, AllMetrics는 플랫폼 메트릭 흐름을 뜻합니다.
 az monitor diagnostic-settings create --name appsvc-diag --resource $WEBAPP_ID \
   --workspace $LAW_ID \
   --logs '[{"category":"AppServiceHTTPLogs","enabled":true},{"category":"AppServiceConsoleLogs","enabled":true},{"category":"AppServicePlatformLogs","enabled":true}]' \
@@ -137,9 +140,11 @@ AppServiceHTTPLogs
 
 ```bash
 # Application Insights 연결 문자열과 App Service 관리형 Python 에이전트를 활성화합니다.
+# connectionString 값은 AI_CONN 변수에만 담고 화면에 출력하지 않아 비밀 값을 그대로 노출하지 않습니다.
 AI_CONN=$(az monitor app-insights component show \
   -g $RG --app $APPI --query connectionString -o tsv)
 
+# 첫 설정은 연결 대상을 지정하고, 두 번째 설정은 App Service의 Python 관리형 에이전트 버전(~3)을 활성화합니다.
 az webapp config appsettings set -g $RG -n $APP \
   --settings \
     APPLICATIONINSIGHTS_CONNECTION_STRING="$AI_CONN" \
@@ -150,6 +155,7 @@ az webapp config appsettings set -g $RG -n $APP \
 
 ```bash
 # 연결 문자열을 노출하지 않고 관리형 계측에 필요한 두 설정이 존재하는지 확인합니다.
+# AI_SETTINGS_OK는 비어 있지 않은 연결 문자열 1개와 버전이 ~3인 에이전트 설정 1개가 모두 있는지 숫자로 검증합니다.
 AI_SETTINGS_OK=$(az webapp config appsettings list -g $RG -n $APP \
   --query "[?name=='APPLICATIONINSIGHTS_CONNECTION_STRING' && value!='' ||
              name=='ApplicationInsightsAgent_EXTENSION_VERSION' && value=='~3'] |
@@ -167,7 +173,9 @@ fi
 
 ```bash
 # 앱 설정 변경으로 재시작된 Web App이 다시 정상화될 때까지 기다립니다.
+# HEALTH_CHECK_STATUS=1은 아직 준비되지 않았음을 뜻하고, 성공 시 0으로 바꿔 후속 트래픽 생성 허용 여부를 판단합니다.
 HEALTH_CHECK_STATUS=1
+# 최대 18번을 5초 간격으로 확인하므로 총 대기 한도는 90초이며, /health가 ok를 반환하는 즉시 반복을 멈춥니다.
 for attempt in $(seq 1 18); do
   if curl -fsS --max-time 10 "$APP_URL/health" |
     jq -e '.status == "ok"' > /dev/null
@@ -188,12 +196,15 @@ fi
 
 ```bash
 # 정상·느린·404 요청을 생성해 성능과 실패 분석용 텔레메트리를 만듭니다.
+# 먼저 정상 기준선으로 /api/info 요청 20회를 보내 일반 성공 요청 표본을 만듭니다.
 for i in $(seq 1 20); do
   curl -fsS "$APP_URL/api/info" > /dev/null
 done
+# 다음으로 /slow?sec=3 요청 5회를 보내 평균/상위 백분위 지연이 눈에 띄게 보이도록 합니다.
 for i in $(seq 1 5); do
   curl -fsS "$APP_URL/slow?sec=3" > /dev/null
 done
+# 마지막 404 표본 5회는 curl -f 대신 HTTP 코드를 직접 캡처해 의도한 실패(404)를 오류로 삼지 않고 검증합니다.
 for i in $(seq 1 5); do
   STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
     "$APP_URL/workshop-not-found")
@@ -210,10 +221,13 @@ done
 
 ```bash
 # AppRequests 적재를 기다린 뒤 경로별 요청 수와 응답 시간 분포를 조회합니다.
+# LAW_CID는 쿼리를 실행할 Log Analytics 워크스페이스의 customerId이고, APPI_ID는 AppRequests에서 대상 앱 텔레메트리만 거를 Application Insights 리소스 ID입니다.
 LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
 APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
 
+# 아직 데이터가 없을 수 있으므로 APP_REQUEST_COUNT를 0으로 시작해 폴링 성공 여부를 명확히 구분합니다.
 APP_REQUEST_COUNT=0
+# 최대 10번을 30초 간격으로 폴링하므로 AppRequests 적재 대기 시간의 상한은 5분입니다.
 for attempt in $(seq 1 10); do
   APP_REQUEST_COUNT=$(az monitor log-analytics query \
     -w "$LAW_CID" \
@@ -224,6 +238,7 @@ for attempt in $(seq 1 10); do
      | where Name == 'GET /api/info'
      | summarize request_count=sum(ItemCount)" \
     --query "[0].request_count" -o tsv 2>/dev/null || true)
+# 2>/dev/null || true 는 적재 전 일시적 빈 결과/오류를 조용히 넘겨 다음 폴링을 계속하기 위한 처리이며, 최종 성공을 의미하지는 않습니다.
 
   if [ "${APP_REQUEST_COUNT:-0}" -gt 0 ] 2>/dev/null; then
     break
@@ -236,6 +251,7 @@ if [ "${APP_REQUEST_COUNT:-0}" -le 0 ] 2>/dev/null; then
   false
 fi
 
+# 최종 KQL은 요청 수(requests), 평균 응답 시간(avg_ms), p95 응답 시간(p95_ms)을 결과 코드(ResultCode)와 성공 여부(Success)별로 묶어 보여 줍니다.
 az monitor log-analytics query -w $LAW_CID --analytics-query \
   "AppRequests
    | where TimeGenerated > ago(30m)
