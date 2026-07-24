@@ -176,50 +176,9 @@ $APP_URL/.auth/me
 
 ---
 
-## 검증
-
-### HTTP 상태 코드 확인
-
-🟢 **실행**
-
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" $APP_URL/
-curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
-```
-
-📋 **예상 출력**
-
-```
-401
-302
-```
-
-### Easy Auth 활성 상태 확인
-
-🟢 **실행**
-
-```bash
-az webapp auth show -g $RG -n $APP \
-  --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table
-```
-
-📋 **예상 출력**
-
-```
-Enabled    Action
----------  --------------------
-True       RedirectToLoginPage
-```
-
-curl로 `401`/`302`가 확인되면 Easy Auth가 정상 활성화된 것입니다.
-
-🖼️ **예상 화면** — 브라우저에서 `$APP_URL`에 접속하면 Entra 로그인 화면으로 리디렉션되고, 로그인 후 `$APP_URL/.auth/me`에서 사용자 클레임 JSON을 확인할 수 있습니다.
-
----
-
 ## 트러블슈팅
 
-### (1) curl이 401/302가 아닌 200을 반환
+### (1) 브라우저 접속 시 로그인 리디렉션 없이 앱이 바로 표시됨
 
 Easy Auth 설정이 아직 전파 중입니다. 30초–1분 대기 후 재시도하거나, 현재 활성 상태를 확인합니다.
 
@@ -228,7 +187,7 @@ az webapp auth show -g $RG -n $APP \
   --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table
 ```
 
-`enabled`가 `true`이고 `action`이 `RedirectToLoginPage`인지 확인합니다. 값이 올바르면 추가 대기 후 curl을 재시도합니다.
+`enabled`가 `true`이고 `action`이 `RedirectToLoginPage`인지 확인합니다. 값이 올바르면 추가 대기 후 브라우저에서 재시도합니다.
 
 ### (2) AADSTS 오류 — 리디렉션 URI 불일치
 
