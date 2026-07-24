@@ -81,16 +81,21 @@ az rest --method patch \
   --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":false}}' \
   --output none &&
 
-# 재실행 시 같은 이름의 profile과 rule이 중복되지 않도록 기존 설정을 제거합니다.
-EXISTING_AUTOSCALE_ID=$(az monitor autoscale list -g "$RG" \
-  --query "[?name=='$AUTOSCALE'].id | [0]" -o tsv)
-if [ -n "$EXISTING_AUTOSCALE_ID" ]; then
-  az monitor autoscale delete --ids "$EXISTING_AUTOSCALE_ID"
-fi &&
-
-az webapp config appsettings delete -g "$RG" -n "$APP" \
-  --setting-names STARTUP_DELAY_SECONDS --output none &&
-echo "Autoscale 전환 준비 완료"
+# 재실행 시 중복되지 않도록 이 Plan을 대상으로 하는 기존 Autoscale 설정을 모두 제거합니다.
+if ! (
+  set -o pipefail
+  az monitor autoscale list -g "$RG" -o json |
+    jq -r --arg plan "$PLAN_ID" \
+      '.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase)) | .id' |
+    xargs -r -n 1 az monitor autoscale delete --ids
+); then
+  echo "기존 Autoscale 설정 제거 실패" >&2
+  false
+else
+  az webapp config appsettings delete -g "$RG" -n "$APP" \
+    --setting-names STARTUP_DELAY_SECONDS --output none &&
+  echo "Autoscale 전환 준비 완료"
+fi
 ```
 
 > ⚠️ 완료 메시지가 보이지 않으면 다음 단계로 진행하지 않습니다.
@@ -261,9 +266,9 @@ capacity=1 latest_cpu=<값 또는 pending>
 🟢 **실행**
 
 ```bash
-# 180초 CPU 부하를 백그라운드로 보내면서 30초마다 worker 수와 CPU를 확인합니다.
+# 약 180초 CPU 부하를 백그라운드로 보내면서 30초마다 worker 수와 CPU를 확인합니다.
 LOAD_OUT="$HOME/autoscale-load-$SUFFIX.out"
-hey -z 180s -c 10 "$APP_URL/load?sec=20" > "$LOAD_OUT" &
+hey -n 9 -c 1 -t 40 "$APP_URL/load?sec=20" > "$LOAD_OUT" &
 HEY_PID=$!
 SCALED_OUT=0
 
@@ -296,6 +301,11 @@ else
 fi
 
 echo "scaled_out=$SCALED_OUT hey_exit=$HEY_STATUS"
+if ! grep -Eq '^[[:space:]]+\[200\][[:space:]]+9 responses' "$LOAD_OUT" ||
+  grep -q '^Error distribution:' "$LOAD_OUT"; then
+  echo "9개의 HTTP 200 응답을 확인하지 못했습니다: $LOAD_OUT" >&2
+  HEY_STATUS=1
+fi
 if [ "$SCALED_OUT" -ne 1 ] || [ "$HEY_STATUS" -ne 0 ]; then
   echo "scale-out 관찰 실패: 트러블슈팅을 확인하세요." >&2
   false
@@ -352,7 +362,7 @@ az monitor metrics list \
 curl -fsS "$APP_URL/load?sec=2" | jq .
 ```
 
-- 최신 CPU가 20%를 넘지 않았다면 동일한 `hey` 명령의 `-z`만 `300s`로 늘려 한 번 재시도합니다.
+- 최신 CPU가 20%를 넘지 않았다면 `-n 15`로 요청 수만 늘려 약 300초 부하를 한 번 재시도합니다.
 - Autoscale target이 Web App이 아니라 `$PLAN_ID`인지 확인합니다.
 - profile이 enabled이고 scale-out 규칙이 `CpuPercentage > 20 avg 1m`인지 확인합니다.
 

@@ -48,7 +48,6 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
-AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
 PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
@@ -107,25 +106,30 @@ if ! command -v hey >/dev/null 2>&1; then
   false
 fi
 
-AUTOSCALE_ID=$(az monitor autoscale list -g "$RG" \
-  --query "[?name=='$AUTOSCALE'].id | [0]" -o tsv)
-if [ -n "$AUTOSCALE_ID" ]; then
-  az monitor autoscale delete --ids "$AUTOSCALE_ID"
-fi &&
+if ! (
+  set -o pipefail
+  az monitor autoscale list -g "$RG" -o json |
+    jq -r --arg plan "$PLAN_ID" \
+      '.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase)) | .id' |
+    xargs -r -n 1 az monitor autoscale delete --ids
+); then
+  echo "Plan의 Autoscale 설정 제거 실패" >&2
+  false
+else
+  az rest --method patch \
+    --uri "${PLAN_ID}?api-version=2024-11-01" \
+    --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+    --output none &&
 
-az rest --method patch \
-  --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
-  --output none &&
+  az rest --method patch \
+    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
+    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
+    --output none &&
 
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none &&
-
-az webapp config appsettings delete -g "$RG" -n "$APP" \
-  --setting-names STARTUP_DELAY_SECONDS --output none &&
-echo "Automatic Scaling 전환 완료"
+  az webapp config appsettings delete -g "$RG" -n "$APP" \
+    --setting-names STARTUP_DELAY_SECONDS --output none &&
+  echo "Automatic Scaling 전환 완료"
+fi
 ```
 
 > ⚠️ 완료 메시지가 보이지 않으면 A/B 준비로 진행하지 않습니다.
@@ -148,8 +152,12 @@ PLAN_STATE=$(az rest --method get \
   --uri "${PLAN_ID}?api-version=2024-11-01")
 APP_STATE=$(az rest --method get \
   --uri "${APP_ID}/config/web?api-version=2024-11-01")
-AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
-  --query "length([?name=='$AUTOSCALE'])" -o tsv)
+AUTOSCALE_COUNT=$(
+  set -o pipefail
+  az monitor autoscale list -g "$RG" -o json |
+    jq -r --arg plan "$PLAN_ID" \
+      '[.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase))] | length'
+)
 
 jq '{automaticScaling:.properties.elasticScaleEnabled,maximumBurst:.properties.maximumElasticWorkerCount}' <<< "$PLAN_STATE"
 jq '{alwaysReady:.properties.minimumElasticInstanceCount,prewarmed:.properties.preWarmedInstanceCount}' <<< "$APP_STATE"
@@ -159,7 +167,7 @@ if ! jq -e '.properties.elasticScaleEnabled == true and .properties.maximumElast
     >/dev/null <<< "$PLAN_STATE" ||
   ! jq -e '.properties.minimumElasticInstanceCount == 1 and .properties.preWarmedInstanceCount == 1' \
     >/dev/null <<< "$APP_STATE" ||
-  [ "$AUTOSCALE_COUNT" -ne 0 ]; then
+  [ "$AUTOSCALE_COUNT" != "0" ]; then
   echo "Automatic Scaling 전환 상태 불일치" >&2
   false
 fi
@@ -274,21 +282,53 @@ az rest --method get \
 
 🟢 **실행 — 단일 인스턴스 기준 상태 확인**
 
-> 👁️ 최근 10분의 `InstanceCount` Average 값을 1분 간격으로 조회합니다. 최신 행이 `count=1`이면 이전 확장이 정리된 단일 인스턴스 기준 상태입니다.
+> 👁️ 이 명령을 시작한 뒤 수집된 `InstanceCount` 1분 Average가 연속 두 번 1이 될 때까지 30초 간격으로 최대 30회(약 15분) 확인합니다. 07의 Autoscale에서 늘어난 worker가 아직 축소 중이면 여기서 기다리므로 이전 instance가 Trial A에 섞이지 않습니다.
 
 ```bash
-# 부하 시작 전 요청을 처리하는 기준 인스턴스 하나를 확인합니다.
-az monitor metrics list \
-  --resource "$APP_ID" \
-  --metric InstanceCount \
-  --interval PT1M \
-  --aggregation Average \
-  --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
-  -o table
+# Trial A 전에 새 메트릭 두 개가 연속으로 단일 인스턴스 상태인지 확인합니다.
+GATE_START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+SINGLE_INSTANCE_READY=0
+for attempt in $(seq 1 30); do
+  INSTANCE_COUNTS=$(az monitor metrics list \
+    --resource "$APP_ID" \
+    --metric InstanceCount \
+    --interval PT1M \
+    --aggregation Average \
+    --start-time "$GATE_START_TIME" \
+    --query "value[0].timeseries[0].data[?average != null].average" \
+    -o tsv)
+  FRESH_SAMPLE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
+    awk 'NF { count++ } END { print count + 0 }')
+  LATEST_INSTANCE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
+    awk 'NF { latest=$1 } END { print latest }')
+  printf 'Trial A scale-in gate %02d/30 samples=%s latest=%s\n' \
+    "$attempt" "$FRESH_SAMPLE_COUNT" "${LATEST_INSTANCE_COUNT:-pending}"
+
+  if [ "$FRESH_SAMPLE_COUNT" -ge 2 ] &&
+    printf '%s\n' "$INSTANCE_COUNTS" | tail -n 2 |
+      awk 'NF { count++; if (($1 + 0) != 1) bad=1 }
+           END { exit !(count == 2 && !bad) }'; then
+    SINGLE_INSTANCE_READY=1
+    break
+  fi
+  if [ "$attempt" -lt 30 ]; then
+    sleep 30
+  fi
+done
+
+if [ "$SINGLE_INSTANCE_READY" -ne 1 ]; then
+  echo "Trial A 최신 단일 인스턴스 메트릭 2회 연속 확인 실패" >&2
+  false
+fi
 ```
 
-> 👁️ 최신 행의 `count`가 `1`인지 확인합니다. 아직 2 이상이면 30초 정도 기다린 뒤 같은 조회 명령을 다시 실행합니다.
+📋 **예상 출력**
+
+```text
+Trial A scale-in gate 01/30 samples=0 latest=pending
+Trial A scale-in gate 03/30 samples=1 latest=1.0
+Trial A scale-in gate 05/30 samples=2 latest=1.0
+```
 
 🟢 **실행 — 시험 A 관찰**
 
@@ -377,21 +417,55 @@ observer exit=0, hey exit=0, metric exit=0
 
 🟢 **실행 — 시험 B 시작 전 단일 인스턴스 기준 상태 확인**
 
-> 👁️ 시험 A 부하로 늘어난 인스턴스가 scale-in됐는지 다시 확인합니다. 최신 메트릭이 `count=1`이 된 뒤에만 시험 B를 시작합니다.
+> 👁️ 이 명령을 시작한 뒤 수집된 `InstanceCount` 1분 Average가 연속 두 번 1이 될 때까지 30초 간격으로 최대 30회(약 15분) 확인합니다. 시험 A 부하로 늘어난 인스턴스가 축소된 뒤에만 Trial B를 시작합니다.
 
 ```bash
-# 시험 B 전에 scale-in되어 기준 인스턴스 하나로 돌아왔는지 확인합니다.
-az monitor metrics list \
-  --resource "$APP_ID" \
-  --metric InstanceCount \
-  --interval PT1M \
-  --aggregation Average \
-  --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
-  -o table
+# Trial B 전에 새 메트릭 두 개가 연속으로 단일 인스턴스 상태인지 확인합니다.
+GATE_START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+SINGLE_INSTANCE_READY=0
+for attempt in $(seq 1 30); do
+  INSTANCE_COUNTS=$(az monitor metrics list \
+    --resource "$APP_ID" \
+    --metric InstanceCount \
+    --interval PT1M \
+    --aggregation Average \
+    --start-time "$GATE_START_TIME" \
+    --query "value[0].timeseries[0].data[?average != null].average" \
+    -o tsv)
+  FRESH_SAMPLE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
+    awk 'NF { count++ } END { print count + 0 }')
+  LATEST_INSTANCE_COUNT=$(printf '%s\n' "$INSTANCE_COUNTS" |
+    awk 'NF { latest=$1 } END { print latest }')
+  printf 'Trial B scale-in gate %02d/30 samples=%s latest=%s\n' \
+    "$attempt" "$FRESH_SAMPLE_COUNT" "${LATEST_INSTANCE_COUNT:-pending}"
+
+  if [ "$FRESH_SAMPLE_COUNT" -ge 2 ] &&
+    printf '%s\n' "$INSTANCE_COUNTS" | tail -n 2 |
+      awk 'NF { count++; if (($1 + 0) != 1) bad=1 }
+           END { exit !(count == 2 && !bad) }'; then
+    SINGLE_INSTANCE_READY=1
+    break
+  fi
+  if [ "$attempt" -lt 30 ]; then
+    sleep 30
+  fi
+done
+
+if [ "$SINGLE_INSTANCE_READY" -ne 1 ]; then
+  echo "Trial B 최신 단일 인스턴스 메트릭 2회 연속 확인 실패" >&2
+  false
+fi
 ```
 
-> 👁️ 최신 행의 `count`가 `1`이 될 때까지 30초 정도 간격으로 같은 명령을 다시 실행합니다. 별도의 prime 부하나 `InstanceCount>=2` 확인은 하지 않습니다.
+📋 **예상 출력**
+
+```text
+Trial B scale-in gate 01/30 samples=0 latest=pending
+...
+Trial B scale-in gate 09/30 samples=2 latest=1.0
+```
+
+> 👁️ 별도의 prime 부하나 `InstanceCount>=2` 확인은 하지 않습니다.
 
 🟢 **실행 — Prewarmed=1 설정**
 
@@ -576,8 +650,12 @@ then
   echo "앱 설정 조회 실패" >&2
   VERIFY_STATUS=1
 fi
-if ! AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
-  --query "length([?name=='$AUTOSCALE'])" -o tsv)
+if ! AUTOSCALE_COUNT=$(
+  set -o pipefail
+  az monitor autoscale list -g "$RG" -o json |
+    jq -r --arg plan "$PLAN_ID" \
+      '[.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase))] | length'
+)
 then
   echo "Autoscale 설정 조회 실패" >&2
   VERIFY_STATUS=1
@@ -766,7 +844,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 - 새 Cloud Shell에서 시작했다면 위 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인한 뒤, 0단계에서 `SUFFIX`와 Azure 리소스 변수만 다시 맞춥니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
-- 5단계의 복원 명령을 실행한 뒤, 4단계의 단일 인스턴스 조회 명령으로 최신 행의 `count`가 `1`인지 다시 확인하고 2단계부터 재실행합니다.
+- 5단계의 복원 명령을 실행한 뒤, 4단계의 단일 인스턴스 게이트에서 새 1분 메트릭 두 개가 연속으로 `1`인지 다시 확인하고 2단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
 - Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
@@ -784,7 +862,7 @@ az monitor metrics list \
 
 ### (2) 단일 인스턴스로 축소되지 않음
 
-시험 A 뒤 4단계의 단일 인스턴스 조회에서 최신 행의 `count`가 계속 2 이상이면 시험 B를 실행하지 말고, 5단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
+시험 A 뒤 4단계의 단일 인스턴스 게이트가 약 15분 안에 통과하지 못하면 시험 B를 실행하지 말고, 5단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
 
 ```bash
 for attempt in $(seq 1 5); do
@@ -816,22 +894,26 @@ SUFFIX=<이전에_메모한_값>
 RG=rg-appsvcworkshop-$SUFFIX
 PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
-AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
 PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 
 # 남아 있는 Autoscale 설정을 제거하고 Automatic Scaling을 다시 활성화합니다.
-AUTOSCALE_ID=$(az monitor autoscale list -g "$RG" \
-  --query "[?name=='$AUTOSCALE'].id | [0]" -o tsv)
-if [ -n "$AUTOSCALE_ID" ]; then
-  az monitor autoscale delete --ids "$AUTOSCALE_ID"
+if ! (
+  set -o pipefail
+  az monitor autoscale list -g "$RG" -o json |
+    jq -r --arg plan "$PLAN_ID" \
+      '.[] | select(((.targetResourceUri // "") | ascii_downcase) == ($plan | ascii_downcase)) | .id' |
+    xargs -r -n 1 az monitor autoscale delete --ids
+); then
+  echo "Plan의 Autoscale 설정 제거 실패" >&2
+  false
+else
+  az rest --method patch \
+    --uri "${PLAN_ID}?api-version=2024-11-01" \
+    --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
+    --output none
 fi
-
-az rest --method patch \
-  --uri "${PLAN_ID}?api-version=2024-11-01" \
-  --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
-  --output none
 
 # Web App 설정 복원과 시작 지연 삭제는 서로 독립적으로 실행합니다.
 az rest --method patch \

@@ -80,7 +80,7 @@ flowchart LR
 
 ### 선택 모듈, 무엇을 고를까?
 
-**09 Automatic Scaling · Prewarmed A/B**는 07의 규칙 기반 Autoscale을 App Service의 HTTP 기반 Automatic Scaling으로 전환하고 Prewarmed를 깊게 관찰하는 실험입니다. `hey`, 두 Python observer, Azure Monitor `InstanceCount`를 사용하며 약 22–33분이 걸립니다. 07 직후 수행하면 상태 전환이 가장 명확합니다.
+**09 Automatic Scaling · Prewarmed A/B**는 07의 규칙 기반 Autoscale을 App Service의 HTTP 기반 Automatic Scaling으로 전환하고 Prewarmed를 깊게 관찰하는 실험입니다. `hey`, 두 Python observer, Azure Monitor `InstanceCount`를 사용하며 약 22–38분이 걸립니다. 07 직후 수행하면 상태 전환이 가장 명확합니다.
 
 10–12 세 모듈은 순서 의존성 없이 **어떤 조합으로든** 건너뛰거나 골라 진행할 수 있습니다(단, 10 수행 후 11·12 진행 시 첫 단계에서 Easy Auth 일시 비활성화 필요).
 
@@ -106,9 +106,9 @@ flowchart LR
 | 04 | 앱 설정·환경변수 | 5–8분 | 설정 변경 후 재시작 전파 ~40초 |
 | 05 | 배포 슬롯 & 스왑 | 10–15분 | 슬롯 생성 + v2 Oryx 빌드 대기 |
 | 06 | 슬롯 트래픽 분할 카나리 | 8–12분 | curl 100회 반복 관찰 |
-| 07 | Autoscale(CPU 규칙 기반 확장) | 10–15분 | CPU 부하 180초 + scale-out 최대 6분 관찰 |
+| 07 | Autoscale(CPU 규칙 기반 확장) | 10–15분 | CPU 부하 약 180초 + scale-out 최대 6분 관찰 |
 | 08 | 관찰 가능성 | 10–15분 | 진단 로그 적재 대기 5–10분 |
-| 09 | (선택) Automatic Scaling · Prewarmed A/B | 22–33분 | 방식 전환 2–3분 + 동일 부하 A/B + 시험 사이 scale-in |
+| 09 | (선택) Automatic Scaling · Prewarmed A/B | 22–38분 | 방식 전환 2–3분 + 동일 부하 A/B + 시험 사이 scale-in |
 | 10 | (선택) 인증 (Easy Auth) | 10–15분 | 인증 설정 전파 + 브라우저 로그인 |
 | 11 | (선택) 사이드카 컨테이너 | 8–12분 | 사이드카 부착 후 재시작 대기 ~60초 |
 | 12 | (선택) Auto-heal & 진단 | 8–12분 | 트리거 후 재활용 관찰 ~90초 |
