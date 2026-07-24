@@ -156,13 +156,13 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 
 🖼️ **예상 화면** — 브라우저가 `login.microsoftonline.com` 로그인 페이지로 리디렉션됩니다. 워크숍 계정으로 로그인하고 권한 동의 화면에서 **수락**을 클릭합니다.
 
-![Entra 로그인 후 표시되는 권한 동의 화면 — auth-appsvcworkshop 앱이 기본 프로필 조회 권한을 요청](images/09-entra-consent.png)
+![Entra 로그인 후 표시되는 권한 동의 화면 — auth-appsvcworkshop 앱이 기본 프로필 조회 권한을 요청](images/10-entra-consent.png)
 
 > 👁️ 동의 화면의 "View your basic profile" 권한은 Easy Auth가 로그인 사용자의 기본 프로필 클레임을 받기 위해 필요한 최소 권한입니다. "이 애플리케이션은 Microsoft에서 게시하지 않았습니다" 문구는 방금 생성한 워크숍용 앱 등록이므로 정상입니다.
 
 🖼️ **예상 화면** — 로그인 후 `$APP_URL`의 Flask 앱 페이지가 정상 표시됩니다.
 
-![로그인 성공 후 Flask 앱 화면이 정상 표시됨 — slot: production, 인스턴스 ID 확인 가능](images/09-app-after-login.png)
+![로그인 성공 후 Flask 앱 화면이 정상 표시됨 — slot: production, 인스턴스 ID 확인 가능](images/10-app-after-login.png)
 
 > 👁️ 화면의 버전(v1/v2)과 배경색은 모듈 진행 상태에 따라 다를 수 있습니다. 로그인 게이트를 통과해 앱 페이지가 표시되는 것이 검증 포인트입니다.
 

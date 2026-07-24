@@ -8,7 +8,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-# 프로세스 시작 시각 — 앱 설정 변경 재시작(04)·Auto-heal 재활용(11) 관찰용
+# 프로세스 시작 시각 — 앱 설정 변경 재시작(04)·Auto-heal 재활용(12) 관찰용
 STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 from flask import Flask, request, jsonify
