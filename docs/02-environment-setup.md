@@ -166,6 +166,7 @@ https://app-appsvcworkshop-XXXXX.azurewebsites.net
 🟢 **실행**
 
 ```bash
+# Web App이 실행 중이고 올바른 호스트 이름을 사용하는지 확인합니다.
 az webapp show -g $RG -n $APP --query state -o tsv
 ```
 
