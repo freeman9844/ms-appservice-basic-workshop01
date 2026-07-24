@@ -1,6 +1,6 @@
 # Azure App Service 기본 핸즈온 워크숍
 
-> Azure App Service의 핵심 라이프사이클을 **Cloud Shell 중심**으로 체험하는 한국어 핸즈온 워크숍입니다(코어 약 1시간 16분–1시간 50분, 09–12 선택 모듈 포함 시 약 2시간 2분–2시간 59분). Python(Flask) 앱을 zip 배포(Oryx 빌드)로 올리고, 앱 설정 → 슬롯 스왑 → 카나리 → 자동 스케일 → 관찰 가능성까지 단계별로 실습합니다. 선택 모듈에서는 **Prewarmed A/B 심화 실험**, **인증(Easy Auth)**, **사이드카 컨테이너**, **Auto-heal & 진단**을 추가로 체험할 수 있습니다.
+> Azure App Service의 핵심 라이프사이클을 **Cloud Shell 중심**으로 체험하는 한국어 핸즈온 워크숍입니다(코어 약 1시간 16분–1시간 50분, 09–12 선택 모듈 포함 시 약 2시간 4분–3시간 2분). Python(Flask) 앱을 zip 배포(Oryx 빌드)로 올리고, 앱 설정 → 슬롯 스왑 → 카나리 → **Autoscale CPU 규칙** → 관찰 가능성까지 단계별로 실습합니다. 선택 모듈에서는 **Automatic Scaling · Prewarmed A/B**, **인증(Easy Auth)**, **사이드카 컨테이너**, **Auto-heal & 진단**을 추가로 체험할 수 있습니다.
 
 ---
 
@@ -29,10 +29,10 @@ flowchart LR
 3. 앱 설정(환경변수)을 추가·변경하고 재시작 동작을 이해할 수 있다.
 4. 배포 슬롯을 생성하고 무중단 swap 및 롤백을 수행할 수 있다.
 5. 슬롯 트래픽 분할로 카나리 배포를 정량 관찰할 수 있다.
-6. Automatic scaling을 구성하고 부하에 따른 확장·축소를 확인할 수 있다.
+6. Azure Monitor Autoscale의 CPU 규칙을 구성하고 Plan scale-out을 관찰할 수 있다.
 7. 진단 설정을 통해 Log Analytics KQL 조회와 App Insights 텔레메트리를 활용할 수 있다.
 8. 사용한 리소스를 모두 정리하고 비용 발생을 종료할 수 있다.
-9. (선택) Prewarmed 0/1에서 새 인스턴스의 시작·최초 응답 타임라인을 비교할 수 있다.
+9. (선택) Autoscale을 Automatic Scaling으로 전환하고 Prewarmed 0/1의 새 인스턴스 시작·최초 응답 타임라인을 비교할 수 있다.
 10. (선택) Easy Auth(Entra ID)로 코드 수정 없이 인증 게이트를 구성하고 `/.auth/me`로 클레임을 확인할 수 있다.
 11. (선택) sitecontainers API로 Redis 사이드카를 부착하고 `/cache` 동작을 확인할 수 있다.
 12. (선택) Auto-heal 규칙을 구성하고 자동 재활용 이벤트를 로그에서 확인할 수 있다.
@@ -65,7 +65,7 @@ flowchart LR
 | 04 | [앱 설정·환경변수](docs/04-app-settings.md) | 앱 설정 추가·변경으로 동작 전환, 설정 변경 = 재시작 체감 |
 | 05 | [배포 슬롯 & 스왑](docs/05-deployment-slots-swap.md) | staging 슬롯 생성 → v2 배포 → 슬롯 URL 확인 → 무중단 swap → 롤백(재 swap) |
 | 06 | [슬롯 트래픽 분할 카나리](docs/06-traffic-split-canary.md) | staging 20% 라우팅 → curl 100회 반복 정량 관찰 → 100% 승격 |
-| 07 | [자동 스케일](docs/07-autoscale.md) | Automatic Scaling 구성 → `hey` 부하 → `InstanceCount` 확장·축소 흐름 관찰 |
+| 07 | [Autoscale](docs/07-autoscale.md) | CPU 규칙과 capacity 1–3 구성 → `/load` 부하 → Plan scale-out 관찰 |
 | 08 | [관찰 가능성](docs/08-observability.md) | 진단 설정 → LAW KQL 조회, App Insights 커넥션 스트링 주입 → 요청 텔레메트리 |
 | 13 | [정리](docs/13-cleanup.md) | RG 삭제 + Entra 앱 등록 삭제 + 과금 종료 확인 |
 
@@ -73,14 +73,14 @@ flowchart LR
 
 | # | 모듈 | 한 줄 설명 |
 |---|------|------------|
-| 09 | [(선택) Prewarmed A/B 실험](docs/09-prewarmed-ab.md) | Prewarmed 0/1에서 새 instance의 시작·최초 응답 타임라인 비교 |
+| 09 | [(선택) Automatic Scaling · Prewarmed A/B](docs/09-prewarmed-ab.md) | Autoscale 제거 → Automatic Scaling 활성화 → Prewarmed 0/1 비교 |
 | 10 | [(선택) 인증 (Easy Auth)](docs/10-easy-auth.md) | Entra 앱 등록 → `az webapp auth` 구성 → 로그인 게이트 → `/.auth/me` |
 | 11 | [(선택) 사이드카 컨테이너](docs/11-sidecar-option.md) | sitecontainers API로 Redis 사이드카 부착 → `/cache` 방문 카운터 동작 확인 |
 | 12 | [(선택) Auto-heal & 진단](docs/12-autoheal-option.md) | `/slow` 반복 → Auto-heal 재활용 규칙 → 재활용 이벤트 확인, 진단 블레이드 소개 |
 
 ### 선택 모듈, 무엇을 고를까?
 
-**09 Prewarmed A/B**는 Automatic Scaling의 기본 동작보다 더 깊게 관찰하려는 참가자를 위한 실험입니다. `hey`, 두 Python observer, Azure Monitor `InstanceCount`를 함께 사용하며 약 20–30분이 걸립니다. 기본 07 직후 수행하면 다른 선택 기능의 영향을 피할 수 있습니다.
+**09 Automatic Scaling · Prewarmed A/B**는 07의 규칙 기반 Autoscale을 App Service의 HTTP 기반 Automatic Scaling으로 전환하고 Prewarmed를 깊게 관찰하는 실험입니다. `hey`, 두 Python observer, Azure Monitor `InstanceCount`를 사용하며 약 22–33분이 걸립니다. 07 직후 수행하면 상태 전환이 가장 명확합니다.
 
 10–12 세 모듈은 순서 의존성 없이 **어떤 조합으로든** 건너뛰거나 골라 진행할 수 있습니다(단, 10 수행 후 11·12 진행 시 첫 단계에서 Easy Auth 일시 비활성화 필요).
 
@@ -106,15 +106,15 @@ flowchart LR
 | 04 | 앱 설정·환경변수 | 5–8분 | 설정 변경 후 재시작 전파 ~40초 |
 | 05 | 배포 슬롯 & 스왑 | 10–15분 | 슬롯 생성 + v2 Oryx 빌드 대기 |
 | 06 | 슬롯 트래픽 분할 카나리 | 8–12분 | curl 100회 반복 관찰 |
-| 07 | 자동 스케일 | 10–15분 | 180초 부하 + scale-in 흐름 최대 5분 관찰 |
+| 07 | Autoscale(CPU 규칙 기반 확장) | 10–15분 | CPU 부하 180초 + scale-out 최대 6분 관찰 |
 | 08 | 관찰 가능성 | 10–15분 | 진단 로그 적재 대기 5–10분 |
-| 09 | (선택) Prewarmed A/B 실험 | 20–30분 | 동일 부하 A/B + 시험 사이 scale-in 5–10분 |
+| 09 | (선택) Automatic Scaling · Prewarmed A/B | 22–33분 | 방식 전환 2–3분 + 동일 부하 A/B + 시험 사이 scale-in |
 | 10 | (선택) 인증 (Easy Auth) | 10–15분 | 인증 설정 전파 + 브라우저 로그인 |
 | 11 | (선택) 사이드카 컨테이너 | 8–12분 | 사이드카 부착 후 재시작 대기 ~60초 |
 | 12 | (선택) Auto-heal & 진단 | 8–12분 | 트리거 후 재활용 관찰 ~90초 |
 | 13 | 정리 | 5–8분 | RG 삭제 요청(비동기) |
 | | **코어 (01–08 + 13)** | **≈ 1시간 16분–1시간 50분** | |
-| | **전체 (01–13)** | **≈ 2시간 2분–2시간 59분** | |
+| | **전체 (01–13)** | **≈ 2시간 4분–3시간 2분** | |
 
 ---
 
@@ -129,7 +129,7 @@ flowchart LR
 | Application Insights (workspace-based) | 수집 데이터 GB 단위 과금 | 실습 수준 소량 |
 | Entra ID 앱 등록 | 무료 | 13 정리에서 삭제 필수 |
 
-전체 실습(01–13)의 약 2시간 2분–2시간 59분 기준 예상 비용은 **USD $1 미만** 수준입니다. 이는 P0v4 1인스턴스 중심 사용(Automatic Scaling은 최대 5개로 수 분 확장)을 더한 대략치이며, 실습 종료 즉시 정리(13) 수행을 권장합니다. 요금은 리전·통화·시점에 따라 변동될 수 있습니다.
+전체 실습(01–13)의 약 2시간 4분–3시간 2분 기준 예상 비용은 **USD $1 미만** 수준입니다. 코어 07은 Autoscale 최대 3개, 선택 09는 Automatic Scaling 최대 5개를 수 분 동안 사용할 수 있다는 조건을 포함한 대략치입니다. 실습 종료 즉시 정리(13)를 수행하세요. 요금은 리전·통화·시점에 따라 변동될 수 있습니다.
 
 ---
 
@@ -158,8 +158,8 @@ flowchart LR
 | 앱 설정 변경 후 동작이 바뀌지 않음 | [04 앱 설정·환경변수](docs/04-app-settings.md#트러블슈팅) |
 | sed 치환·스왑 문제 | [05 배포 슬롯 & 스왑](docs/05-deployment-slots-swap.md#트러블슈팅) |
 | 트래픽 분할 비율이 안 보임 | [06 슬롯 트래픽 분할 카나리](docs/06-traffic-split-canary.md#트러블슈팅) |
-| 인스턴스가 확장/축소되지 않음 | [07 자동 스케일](docs/07-autoscale.md#트러블슈팅) |
-| Prewarmed A/B 관찰·복원이 실패함 | [09 Prewarmed A/B](docs/09-prewarmed-ab.md#트러블슈팅) |
+| Autoscale CPU 규칙으로 확장되지 않음 | [07 Autoscale](docs/07-autoscale.md#트러블슈팅) |
+| Automatic Scaling 전환·Prewarmed A/B 복원이 실패함 | [09 Automatic Scaling · Prewarmed A/B](docs/09-prewarmed-ab.md#트러블슈팅) |
 | KQL 쿼리 결과 없음 | [08 관찰 가능성](docs/08-observability.md#트러블슈팅) |
 | 로그인 리디렉션이 안 됨 | [10 (선택) 인증 (Easy Auth)](docs/10-easy-auth.md#트러블슈팅) |
 | `/cache`가 계속 unavailable | [11 (선택) 사이드카 컨테이너](docs/11-sidecar-option.md#트러블슈팅) |

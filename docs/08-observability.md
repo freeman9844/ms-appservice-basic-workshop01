@@ -343,4 +343,4 @@ az extension add --name application-insights --upgrade --only-show-errors
 
 ---
 
-이전 모듈: [07. 자동 스케일](07-autoscale.md) · 다음 선택 모듈: [09. Prewarmed A/B 실험](09-prewarmed-ab.md) 또는 [10. Easy Auth](10-easy-auth.md) · [13. 정리](13-cleanup.md)
+이전 모듈: [07. Autoscale(CPU 규칙 기반 확장)](07-autoscale.md) · 다음 선택 모듈: [09. Automatic Scaling · Prewarmed A/B](09-prewarmed-ab.md) 또는 [10. Easy Auth](10-easy-auth.md) · [13. 정리](13-cleanup.md)

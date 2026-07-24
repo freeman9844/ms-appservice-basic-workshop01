@@ -212,4 +212,4 @@ az extension add --name authV2 --upgrade --only-show-errors
 
 ---
 
-이전 선택 모듈: [09. Prewarmed A/B 실험](09-prewarmed-ab.md) 또는 이전 코어 모듈: [08. 관찰 가능성](08-observability.md) · 다음 모듈: [11. Sidecar(선택)](11-sidecar-option.md) 또는 [13. 정리](13-cleanup.md)
+이전 선택 모듈: [09. Automatic Scaling · Prewarmed A/B](09-prewarmed-ab.md) 또는 이전 코어 모듈: [08. 관찰 가능성](08-observability.md) · 다음 모듈: [11. Sidecar(선택)](11-sidecar-option.md) 또는 [13. 정리](13-cleanup.md)

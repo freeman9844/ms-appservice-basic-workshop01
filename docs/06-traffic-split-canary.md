@@ -188,4 +188,4 @@ v2
 
 ---
 
-이전 모듈: [05. 배포 슬롯·무중단 스왑·롤백](05-deployment-slots-swap.md) · 다음 모듈: [07. 자동 스케일](07-autoscale.md)
+이전 모듈: [05. 배포 슬롯·무중단 스왑·롤백](05-deployment-slots-swap.md) · 다음 모듈: [07. Autoscale(CPU 규칙 기반 확장)](07-autoscale.md)

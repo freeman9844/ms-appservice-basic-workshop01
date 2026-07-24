@@ -107,7 +107,7 @@ echo $APP_URL
 > | `V4` | 4세대 Premium 하드웨어 계층 |
 >
 > 이번 워크숍에서 **P0v4**를 선택한 이유:
-> - 배포 슬롯, Automatic scaling, Linux 사이드카 등 전체 실습을 하나의 Plan에서 진행할 수 있습니다.
+> - P0v4 하나로 배포 슬롯, 07의 규칙 기반 Autoscale, 선택 09의 Automatic Scaling, Linux 사이드카 실습을 모두 진행할 수 있습니다.
 > - Premium V4는 이전 세대보다 빠른 프로세서와 NVMe 로컬 스토리지를 제공합니다.
 > - P0v4는 Premium V4의 최소 범용 SKU이므로 워크숍 비용을 낮추면서 핵심 기능을 실습하기 적합합니다.
 > - Premium V4는 **Korea Central**에서 지원됩니다. 다만 구독과 App Service 배포 단위에 따라 SKU가 표시되지 않을 수 있습니다.
