@@ -137,7 +137,15 @@ curl -s $STG_URL/api/info | jq '{version, slot}'
 
 > 👁️ **스왑 동작 원리**
 >
-> `az webapp deployment slot swap`은 코드를 재배포하지 않고 **라우팅을 교환**합니다. 전환 전 대상 슬롯이 워밍업(헬스 체크 통과)을 완료한 뒤 전환이 이루어지므로 다운타임이 없습니다. 롤백은 재스왑 한 번이면 충분합니다.
+> `az webapp deployment slot swap`은 코드를 재배포하지 않고 **라우팅을 교환**합니다. 전환 전 플랫폼이 대상 슬롯의 모든 인스턴스에 워밍업 요청을 보내 앱 기동을 확인한 뒤 전환하므로 다운타임이 없습니다. 롤백은 재스왑 한 번이면 충분합니다.
+>
+> ⚠️ **기본 워밍업은 헬스 체크가 아닙니다.** 기본 동작은 루트 경로(`/`)에 요청을 보내고 **모든 HTTP 응답 코드(500 포함)를 유효로 간주**합니다. 실제 상태 검증을 원하면 아래 앱 설정으로 워밍업 경로와 허용 상태 코드를 지정하십시오([공식 문서](https://learn.microsoft.com/azure/app-service/deploy-staging-slots#specify-custom-warm-up)).
+>
+> ```bash
+> # (선택) 워밍업이 /health에서 200을 반환해야만 스왑이 진행되도록 강제
+> az webapp config appsettings set -g $RG -n $APP \
+>   --settings WEBSITE_SWAP_WARMUP_PING_PATH=/health WEBSITE_SWAP_WARMUP_PING_STATUSES=200
+> ```
 
 🟢 **실행**
 

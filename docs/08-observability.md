@@ -74,7 +74,7 @@ az monitor diagnostic-settings create --name appsvc-diag --resource $WEBAPP_ID \
   --metrics '[{"category":"AllMetrics","enabled":true}]'
 ```
 
-> 👁️ `AppServiceHTTPLogs`는 HTTP 액세스 로그, `AppServiceConsoleLogs`는 앱 표준 출력, `AppServicePlatformLogs`는 배포·스케일 이벤트를 수집합니다. **설정을 켰다 ≠ 데이터가 흐른다** — 진단 설정 활성화 후 첫 요청이 도달해야 로그가 생성되며, LAW 적재까지 5–10분의 지연이 있습니다.
+> 👁️ `AppServiceHTTPLogs`는 HTTP 액세스 로그, `AppServiceConsoleLogs`는 앱 표준 출력, `AppServicePlatformLogs`는 **컨테이너 운영 로그**(Linux에서 컨테이너 기동·재시작 등 플랫폼 수준 이벤트)를 수집합니다([공식 분류](https://learn.microsoft.com/azure/app-service/monitor-app-service-reference)). 배포·스왑 같은 관리 작업 이력은 별도로 **Activity Log**에 기록됩니다. **설정을 켰다 ≠ 데이터가 흐른다** — 진단 설정 활성화 후 첫 요청이 도달해야 로그가 생성되며, LAW 적재까지 5–10분의 지연이 있습니다.
 
 ---
 

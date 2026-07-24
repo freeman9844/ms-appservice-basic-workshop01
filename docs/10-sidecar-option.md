@@ -61,10 +61,13 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 |---|---|
 | **네트워크 공유** | 주 앱과 사이드카는 `localhost`를 공유 — 앱 코드는 `localhost:6379`만 알면 됨 |
 | **코드 수정** | 앱 코드에 Redis 주소가 이미 `localhost:6379`로 설정되어 있으면 변경 불필요 |
+| **수명 주기** | 사이드카는 주 앱과 함께 시작·중지·확장 — **인스턴스마다 독립된 사이드카**가 실행됨 |
 | **주요 활용 예** | 캐시(Redis), 리버스 프록시(Nginx), AI 에이전트 사이드카 |
 | **ACA 대응** | Azure Container Apps도 동일 패턴의 사이드카 지원 — 패턴이 이식 가능 |
 
 > 👁️ 이 워크숍 앱의 `/cache` 엔드포인트는 `REDIS_HOST` 앱 설정 값을 사용하며 기본값은 `localhost`입니다. Redis가 없으면 `{"cache":"unavailable"}`을 반환하고, Redis가 정상 동작하면 방문 횟수(`visits`)를 증가시켜 반환합니다.
+
+> ⚠️ **Redis 사이드카는 영속성이 없습니다.** 데이터가 컨테이너 메모리에만 저장되므로 앱 재시작·재배포·스케일 이벤트 시 `visits` 카운터가 초기화됩니다. 또한 인스턴스마다 독립된 Redis가 실행되므로 인스턴스 간에 데이터가 공유되지 않습니다. 영속·공유 캐시가 필요한 프로덕션 워크로드에는 [Azure Managed Redis](https://learn.microsoft.com/azure/redis/overview)를 사용하십시오(기존 Azure Cache for Redis는 퇴역이 예고되어 신규 워크로드에 권장되지 않습니다).
 
 ---
 
@@ -137,6 +140,14 @@ redis   mcr.microsoft.com/mirror/docker/library/redis:7.2         False
 ---
 
 ## 4단계 — 사이드카 동작 검증
+
+> ⚠️ **인스턴스 수 확인** — 인스턴스마다 독립된 Redis 사이드카가 실행되므로, 모듈 07의 자동 스케일로 인스턴스가 2개 이상이면 curl 요청이 분산되어 `visits` 값이 단조 증가하지 않을 수 있습니다(예: `1, 1, 2, …`). 아래 명령으로 인스턴스가 1개인지 확인한 후 진행하십시오. 1개가 아니라면 트래픽 감소 후 자동 축소(5–10분)를 기다립니다.
+
+🟢 **실행** — 인스턴스 수 확인
+
+```bash
+az webapp list-instances -g $RG -n $APP -o table
+```
 
 🟢 **실행** — 60초 대기 후 `/cache`를 두 번 호출하여 `visits` 값이 단조 증가하는지 확인합니다.
 
@@ -227,7 +238,7 @@ curl -s $APP_URL/cache | jq
 }
 ```
 
-`visits`가 호출마다 단조 증가하면 Redis 사이드카가 정상 동작하는 것입니다.
+`visits`가 호출마다 단조 증가하면(인스턴스 1개 기준) Redis 사이드카가 정상 동작하는 것입니다.
 
 ---
 

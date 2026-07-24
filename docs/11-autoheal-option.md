@@ -60,6 +60,8 @@ Auto-heal은 App Service가 설정된 조건(트리거)을 감지하면 정해�
 | **LogEvent** | 이벤트 로그만 기록 |
 | **CustomAction** | 사용자 지정 실행 파일 수행 |
 
+> ⚠️ **Linux 지원 범위** — Linux App Service에서 안정적으로 지원되는 액션은 **Recycle**입니다. `LogEvent`와 `CustomAction`은 Windows App Service 기준 액션으로, Linux에서는 지원이 제한적일 수 있어 이 워크숍에서는 Recycle만 사용합니다.
+
 > 👁️ `minProcessExecutionTime`은 프로세스가 기동된 직후 너무 빨리 재활용되지 않도록 보호하는 안전장치입니다. 설정값(예: `00:01:00`) 이전에는 Auto-heal 액션이 실행되지 않습니다.
 
 > 👁️ **앞선 모듈의 관찰 기법 재사용** — 03 모듈의 로그 스트리밍과 04 모듈의 `started_at` 비교 방식을 함께 활용하여 프로세스 재활용을 확인합니다. 플랫폼 이벤트를 코드 수정 없이 관찰하는 동일한 접근법입니다.
@@ -195,6 +197,8 @@ curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로�
 ---
 
 ## 🖼️ App Service 진단 — 포털에서 이벤트 확인
+
+> 👁️ Auto-heal 이벤트가 포털 진단 타임라인에 표시되기까지 **5–15분**이 소요될 수 있습니다. 5단계에서 `started_at` 값 변경을 이미 확인했다면 재활용은 성공한 것이므로, 포털 확인은 잠시 후 여유 있을 때 진행해도 됩니다.
 
 🖼️ **예상 화면** — 자동 수집된 Auto-heal 이벤트를 App Service 진단 화면에서 확인합니다.
 

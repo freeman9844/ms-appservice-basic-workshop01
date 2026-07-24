@@ -93,7 +93,9 @@ echo "CLIENT_ID=$CLIENT_ID"   # ⚠️ 12 정리에서 필요 — 메모
 
 > ⚠️ **`CLIENT_ID` 값을 반드시 메모하십시오.** 모듈 12(정리)에서 Entra 앱 등록을 삭제할 때 이 값이 필요합니다.
 
-> 👁️ `--sign-in-audience AzureADMyOrg`는 이 테넌트 계정만 로그인을 허용합니다. `--enable-id-token-issuance true`는 OpenID Connect ID 토큰 발급을 활성화하여 Easy Auth가 사용자 클레임을 수신할 수 있게 합니다.
+> 👁️ `--sign-in-audience AzureADMyOrg`는 이 테넌트 계정만 로그인을 허용합니다. `--enable-id-token-issuance true`는 **필수 설정**입니다 — client secret이 구성된 Easy Auth는 하이브리드 플로(`response_type=code id_token`)를 사용하므로([공식 문서](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization#client-type-and-oauth-flow-behavior)), 앱 등록에서 ID 토큰 발급이 꺼져 있으면 로그인 시 `AADSTS700054` 오류가 발생합니다.
+
+> 👁️ 운영 환경에서는 **배포 슬롯마다 별도의 Entra 앱 등록**을 사용하는 것이 권장됩니다(환경 간 권한 공유 방지). 이 워크숍에서는 production 슬롯에만 Easy Auth를 구성합니다.
 
 ---
 

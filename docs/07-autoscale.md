@@ -180,6 +180,8 @@ az rest --method get \
 >
 > Automatic scaling을 활성화하면 기존 앱의 **ARR Affinity(세션 선호도)**가 자동으로 비활성화됩니다. 특정 인스턴스에 요청을 고정하지 않아야 여러 인스턴스로 트래픽을 고르게 분산할 수 있기 때문입니다.
 >
+> **배포 슬롯 트래픽은 자동 스케일 대상이 아닙니다.** 공식 문서 기준 Automatic scaling은 배포 슬롯 트래픽을 지원하지 않으므로, 이 모듈의 부하 테스트는 항상 production URL(`$APP_URL`)로 수행합니다. staging 슬롯(`$STG_URL`)에 부하를 보내도 스케일 아웃이 발생하지 않습니다([공식 문서](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)).
+>
 > **P0v4에서 ARM REST API를 사용하는 이유:** 공식 App Service 기능은 Premium v4를 지원하지만, Azure CLI 2.87.0의 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령에는 Premium v2/v3만 허용하는 이전 SKU 검증 로직이 남아 있습니다. `az rest`는 같은 공식 ARM 속성을 직접 설정하여 이 CLI 제한을 우회합니다.
 
 ---

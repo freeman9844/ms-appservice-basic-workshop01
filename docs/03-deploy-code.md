@@ -176,12 +176,15 @@ App Service의 로그를 파일 시스템에 기록하도록 활성화한 뒤, C
 🟢 **실행**
 
 ```bash
-# 애플리케이션 로그와 웹 서버 로그를 App Service 파일 시스템에 기록
-az webapp log config -g $RG -n $APP --application-logging filesystem --web-server-logging filesystem
+# 애플리케이션 로그(verbose 수준)와 웹 서버 로그를 App Service 파일 시스템에 기록
+az webapp log config -g $RG -n $APP \
+  --application-logging filesystem --level verbose --web-server-logging filesystem
 
 # 활성화된 로그를 현재 터미널에 실시간 출력
 az webapp log tail -g $RG -n $APP
 ```
+
+> 👁️ `--level`을 지정하지 않으면 기본값 `error`가 적용되어 정보성(INFO) 로그가 기록되지 않을 수 있습니다. 또한 파일 시스템 애플리케이션 로그는 디스크 보호를 위해 **활성화 후 12시간이 지나면 자동으로 비활성화**됩니다. 장기 보관이 필요하면 [08. 관찰 가능성](08-observability.md)의 Log Analytics 연동을 사용하십시오.
 
 `az webapp log tail`은 새 로그를 기다리며 계속 실행되는 명령입니다. 이 Cloud Shell 탭은 그대로 두고 **새 Cloud Shell 탭**을 연 다음 요청을 전송합니다.
 

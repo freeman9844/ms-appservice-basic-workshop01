@@ -171,7 +171,9 @@ v2
 
 ## 검증
 
-### 트래픽 분할 확인
+### 트래픽 라우팅 해제 확인
+
+> 👁️ 3단계에서 `traffic-routing clear`를 실행했으므로 **빈 목록이 정상**입니다. 20% 항목이 여전히 표시된다면 `clear`가 누락된 것이므로 트러블슈팅 (3)을 참고하십시오.
 
 🟢 **실행**
 
@@ -179,12 +181,9 @@ v2
 az webapp traffic-routing show -g $RG -n $APP -o table
 ```
 
-📋 **예상 출력**
+📋 **예상 출력** — 라우팅 규칙 없음(빈 출력)
 
 ```
-ActionHostName                                          Name     ReroutePercentage
-------------------------------------------------------  -------  -------------------
-app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 ```
 
 ### 카나리 승격 후 버전 확인
@@ -201,7 +200,7 @@ curl -s $APP_URL/api/info | jq -r .version
 v2
 ```
 
-트래픽 분할 20% 설정과 스왑 후 production이 v2로 전환되면 06 모듈이 완료된 것입니다.
+라우팅 규칙이 비어 있고 production이 v2로 전환되었으면 06 모듈이 완료된 것입니다(종료 상태: production = v2, staging = v1, 라우팅 0%).
 
 ---
 
