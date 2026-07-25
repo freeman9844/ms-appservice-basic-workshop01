@@ -94,9 +94,11 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```bash
 # staging 슬롯이 없을 때만 production 구성을 복제하여 생성합니다.
 # 이미 생성된 슬롯이 있으면 재실행 시 오류를 내지 않고 다음 단계에서 그대로 사용합니다.
-STAGING_SLOT_COUNT=$(az webapp deployment slot list -g "$RG" -n "$APP" \
-  --query "length([?name=='staging'])" -o tsv)
-if [ "$STAGING_SLOT_COUNT" = "0" ]; then
+if ! STAGING_SLOT_COUNT=$(az webapp deployment slot list -g "$RG" -n "$APP" \
+  --query "length([?name=='staging'])" -o tsv); then
+  echo "staging 슬롯 조회 실패" >&2
+  false
+elif [ "$STAGING_SLOT_COUNT" = "0" ]; then
   az webapp deployment slot create -g "$RG" -n "$APP" \
     --slot staging --configuration-source "$APP" --output none
   echo "staging 슬롯 생성 완료"
