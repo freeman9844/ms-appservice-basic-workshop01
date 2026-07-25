@@ -178,45 +178,12 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "User-Agent: Mozilla/5.0" $APP_URL/
 
 ## 트러블슈팅
 
-### (1) 브라우저 접속 시 로그인 리디렉션 없이 앱이 바로 표시됨
-
-Easy Auth 설정이 아직 전파 중입니다. 30초–1분 대기 후 재시도하거나, 현재 활성 상태를 확인합니다.
-
-```bash
-az webapp auth show -g $RG -n $APP \
-  --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table
-```
-
-`enabled`가 `true`이고 `action`이 `RedirectToLoginPage`인지 확인합니다. 값이 올바르면 추가 대기 후 브라우저에서 재시도합니다.
-
-### (2) AADSTS 오류 — 리디렉션 URI 불일치
-
-Entra 앱 등록의 리디렉션 URI가 실제 앱 URL과 다를 때 발생합니다. `APP_URL` 변수가 올바른지 확인한 뒤 앱 등록을 업데이트합니다.
-
-```bash
-echo $APP_URL
-az ad app update --id $CLIENT_ID \
-  --web-redirect-uris "$APP_URL/.auth/login/aad/callback"
-```
-
-업데이트 후 브라우저 캐시를 지우고 다시 접속합니다.
-
-### (3) 앱 등록 생성 실패 — 권한 부족
-
-테넌트 정책에 의해 일반 사용자의 앱 등록이 제한될 수 있습니다.
-
-- Azure Portal → **Microsoft Entra ID** → **사용자 설정** → **앱 등록** 항목을 확인합니다.
-- 앱 등록이 제한된 경우 테넌트 관리자에게 권한 부여 또는 앱 등록 직접 생성을 요청합니다.
-
-### (4) `az webapp auth microsoft update` 명령 없음
-
-`authV2` 확장이 설치되지 않은 경우입니다. 모듈 01에서 설치했으나 Cloud Shell 세션 초기화 시 누락될 수 있습니다.
-
-```bash
-az extension add --name authV2 --upgrade --only-show-errors
-```
-
-설치 후 2단계 명령을 재실행합니다.
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| 브라우저 접속 시 로그인 리디렉션 없이 앱이 바로 표시됨 | Easy Auth 설정 전파가 아직 완료되지 않았거나 인증 플랫폼이 활성화되지 않았습니다. | 30초–1분 기다린 뒤 `az webapp auth show -g $RG -n $APP --query "{enabled:properties.platform.enabled,action:properties.globalValidation.unauthenticatedClientAction}" -o table`로 `enabled=true`, `action=RedirectToLoginPage`인지 확인하고 재시도합니다. |
+| AADSTS 리디렉션 URI 불일치 오류가 발생함 | Entra 앱 등록의 URI와 실제 App Service 콜백 URL이 다릅니다. | `echo $APP_URL`로 URL을 확인하고 `az ad app update --id $CLIENT_ID --web-redirect-uris "$APP_URL/.auth/login/aad/callback"`으로 수정합니다.<br>브라우저 캐시를 지운 뒤 다시 접속합니다. |
+| Entra 앱 등록 생성이 권한 부족으로 실패함 | 테넌트 정책에서 일반 사용자의 앱 등록을 제한하고 있습니다. | Portal의 **Microsoft Entra ID → 사용자 설정 → 앱 등록**을 확인합니다.<br>제한되어 있으면 테넌트 관리자에게 권한 부여 또는 앱 등록 생성을 요청합니다. |
+| `az webapp auth microsoft update` 명령을 찾을 수 없음 | `authV2` 확장이 설치되지 않았거나 Cloud Shell 세션 초기화 후 누락되었습니다. | `az extension add --name authV2 --upgrade --only-show-errors`로 설치한 뒤 2단계를 다시 실행합니다. |
 
 ---
 

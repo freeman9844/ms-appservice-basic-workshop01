@@ -378,46 +378,11 @@ scaled_out=1 hey_exit=0
 
 ## 트러블슈팅
 
-### scale-out이 관찰되지 않음
-
-```bash
-# Autoscale 활성 상태와 전체 profile을 확인합니다.
-az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
-  --query "{enabled:enabled,profile:profiles[0]}" -o json
-
-# 최근 15분 CPU 메트릭 테이블로 임계값 20%를 실제로 넘겼는지 확인합니다.
-az monitor metrics list \
-  --resource "$PLAN_ID" \
-  --metric CpuPercentage \
-  --interval PT1M \
-  --aggregation Average \
-  --start-time "$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-  -o table
-
-# /load 엔드포인트를 직접 짧게 호출해 부하 생성 경로 자체가 정상 응답하는지 먼저 분리 점검합니다.
-curl -fsS "$APP_URL/load?sec=2" | jq .
-```
-
-- 최신 CPU가 20%를 넘지 않았다면 `-n 15`로 요청 수만 늘려 약 300초 부하를 다시 걸어 1분 평균 CPU가 임계값을 넘을 시간을 더 확보합니다.
-- Autoscale target이 Web App이 아니라 `$PLAN_ID`인지 확인합니다.
-- profile이 enabled이고 scale-out 규칙이 `CpuPercentage > 20 avg 1m`인지 확인합니다.
-
-### Autoscale rule 생성 실패
-
-```bash
-az monitor metrics list-definitions \
-  --resource "$PLAN_ID" \
-  --query "[?name.value=='CpuPercentage'].{name:name.value,displayName:name.localizedValue}" \
-  -o table
-```
-
-### hey 설치 실패
-
-```bash
-go install github.com/rakyll/hey@latest
-export PATH=$HOME/go/bin:$PATH
-command -v hey
-```
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| 부하를 생성해도 scale-out이 관찰되지 않음 | Autoscale이 비활성화되었거나 대상이 Plan이 아니거나, 1분 평균 CPU가 20% 임계값을 넘지 않았을 수 있습니다. | `az monitor autoscale show -g "$RG" -n "$AUTOSCALE" --query "{enabled:enabled,profile:profiles[0]}" -o json`으로 활성 상태와 profile을 확인합니다.<br>`az monitor metrics list --resource "$PLAN_ID" --metric CpuPercentage --interval PT1M --aggregation Average --start-time "$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" -o table`로 CPU를 확인합니다.<br>`curl -fsS "$APP_URL/load?sec=2" \| jq .`로 부하 경로를 점검합니다.<br>target이 `$PLAN_ID`이고 규칙이 `CpuPercentage > 20 avg 1m`인지 확인하며, CPU가 20%를 넘지 않았다면 `-n 15`로 약 300초 부하를 다시 실행합니다. |
+| Autoscale rule 생성이 실패함 | 대상 Plan에서 `CpuPercentage` 메트릭 정의를 찾지 못했거나 메트릭 이름이 잘못되었습니다. | `az monitor metrics list-definitions --resource "$PLAN_ID" --query "[?name.value=='CpuPercentage'].{name:name.value,displayName:name.localizedValue}" -o table`로 메트릭 정의를 확인한 뒤 규칙을 다시 생성합니다. |
+| `hey` 설치가 실패하거나 명령을 찾을 수 없음 | Go 설치 경로가 `PATH`에 없거나 GitHub 다운로드가 일시적으로 실패했습니다. | `go install github.com/rakyll/hey@latest`를 다시 실행하고 `export PATH=$HOME/go/bin:$PATH`를 적용한 뒤 `command -v hey`로 확인합니다. |
 
 ---
 

@@ -230,50 +230,12 @@ curl -s $APP_URL/api/info | jq -r .started_at   # 이전 값과 다름 = 프로�
 
 ## 트러블슈팅
 
-### (1) 재활용 미발생 — started_at이 변하지 않음
-
-임계값이 2분 창 안에 충족되지 않았거나 대기 시간이 부족했을 수 있습니다.
-
-- `sec=5`가 `timeTaken: 00:00:03`(3초)를 실제로 초과하는지 확인합니다.
-
-```bash
-time curl -s "$APP_URL/slow?sec=5" > /dev/null
-```
-
-- 인스턴스가 여러 개이면 요청이 분산됩니다. `az webapp list-instances`로 인스턴스 수를 확인하고 1개로 줄어들 때까지 기다립니다.
-- 60–90초 대기가 부족했을 수 있습니다. 추가로 60초 더 기다린 후 재확인합니다.
-- **`minProcessExecutionTime` 창 안에서 트리거되었을 수 있습니다.** 2단계 규칙 적용은 사이트 구성 변경이라 앱이 재시작되며, 재시작 후 1분 이내에는 트리거가 충족돼도 Recycle이 억제됩니다. 3단계의 `sleep 90` 없이 바로 4단계를 실행했다면 이 경우입니다 — 4단계(slow 요청 6회)부터 다시 실행하고 90초 대기 후 재확인합니다.
-
-### (2) `/api/info` 또는 `/slow` 엔드포인트 403 응답
-
-Easy Auth가 아직 활성 상태입니다(모듈 10 수행자만 해당). 1단계 명령을 재실행합니다.
-
-```bash
-# 403은 Auto-heal 실패가 아니라 Easy Auth가 여전히 앞단에서 /api/info·/slow 요청을 막고 있다는 신호입니다.
-az webapp auth update -g $RG -n $APP --enabled false
-```
-
-### (3) `az resource update` 오류 — 규칙이 적용되지 않음
-
-`--set` 인자의 JSON 이스케이프 오류일 가능성이 있습니다. 적용된 구성을 확인하고, `slowRequests`가 `null`이면 명령을 다시 실행합니다.
-
-```bash
-az webapp config show -g $RG -n $APP --query "{enabled:autoHealEnabled}" -o json
-az resource show -g $RG --resource-type "Microsoft.Web/sites/config" \
-  --name "$APP/config/web" --query "properties.autoHealRules" -o json
-```
-
-> ⚠️ `az webapp config set --generic-configurations`로 중첩 JSON을 전달하는 방식은 `slowRequests` 트리거가 무시되는 문제가 있으므로 사용하지 않습니다(2단계 참고).
-
-### (4) `jq: error` 또는 started_at 필드 없음
-
-`/api/info` 응답 구조를 확인합니다.
-
-```bash
-curl -s $APP_URL/api/info | jq
-```
-
-`started_at` 키가 없으면 앱이 아직 기동 중이거나 엔드포인트 경로가 다를 수 있습니다. 30초 후 재시도합니다.
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| Auto-heal 후에도 `started_at`이 바뀌지 않음 | 2분 창 안에 임계값을 충족하지 못했거나, 여러 인스턴스로 요청이 분산되었거나, 재시작 직후 `minProcessExecutionTime` 억제 구간에 트리거했을 수 있습니다. | `time curl -s "$APP_URL/slow?sec=5" > /dev/null`로 3초를 실제로 초과하는지 확인합니다.<br>`az webapp list-instances -g $RG -n $APP`로 인스턴스가 1개인지 확인합니다.<br>규칙 적용 후 `sleep 90`을 지켰는지 확인하고, 지키지 않았다면 4단계의 slow 요청 6회부터 다시 실행한 뒤 90초 더 기다립니다. |
+| `/api/info` 또는 `/slow`가 403을 반환함 | 모듈 10에서 설정한 Easy Auth가 앞단에서 익명 요청을 차단하고 있습니다. | `az webapp auth update -g $RG -n $APP --enabled false`로 Easy Auth를 비활성화한 뒤 1단계부터 다시 확인합니다. |
+| `az resource update` 오류가 발생하거나 Auto-heal 규칙이 적용되지 않음 | `--set`에 전달한 중첩 JSON의 이스케이프가 잘못되어 `slowRequests`가 `null`이 되었을 수 있습니다. | `az webapp config show -g $RG -n $APP --query "{enabled:autoHealEnabled}" -o json`과 `az resource show -g $RG --resource-type "Microsoft.Web/sites/config" --name "$APP/config/web" --query "properties.autoHealRules" -o json`으로 확인하고 2단계 명령을 다시 실행합니다.<br>`az webapp config set --generic-configurations`는 `slowRequests`가 무시될 수 있으므로 사용하지 않습니다. |
+| `jq: error`가 발생하거나 응답에 `started_at`이 없음 | 앱 기동이 완료되지 않았거나 `/api/info` 응답 구조·경로가 예상과 다릅니다. | `curl -s $APP_URL/api/info \| jq`로 전체 응답을 확인하고 30초 후 재시도합니다. |
 
 ---
 

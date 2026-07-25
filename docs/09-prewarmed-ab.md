@@ -775,113 +775,14 @@ Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.micros
 
 ## 트러블슈팅
 
-### (1) 새 instance를 관찰하지 못함
-
-`observe_instances.py`가 2로 종료되거나 JSON의 `observations` 배열이 비어 있으면, 이번 burst에서 새 instance를 관찰하지 못한 것입니다. 한 번의 실행만으로 Automatic scaling 실패나 `Prewarmed` 무효를 단정하지 말고 다음을 점검합니다.
-
-- 새 Cloud Shell에서 시작했다면 먼저 0단계에서 `SUFFIX`와 Azure 리소스 변수를 다시 맞춘 뒤, 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인합니다.
-- `STARTUP_DELAY_SECONDS=30` 적용 후 `/health`가 정상 응답했는지 확인합니다.
-- 트러블슈팅 (4)의 복구 명령을 실행한 뒤, 4단계의 단일 인스턴스 게이트에서 새 1분 메트릭 두 개가 연속으로 `1`인지 다시 확인하고 2단계부터 재실행합니다.
-- 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
-- Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
-
-```bash
-# 최근 10분의 InstanceCount 1분 Average만 표로 뽑아, 방금 시험 시간대에 scale-out 흔적이 있었는지 빠르게 진단합니다.
-START=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
-az monitor metrics list \
-  --resource "$APP_ID" \
-  --metric InstanceCount \
-  --interval PT1M \
-  --aggregation Average \
-  --start-time "$START" \
-  --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,instances:average}" \
-  -o table
-```
-
-### (2) 단일 인스턴스로 축소되지 않음
-
-시험 A 뒤 4단계의 단일 인스턴스 게이트가 약 15분 안에 통과하지 못하면 시험 B를 실행하지 말고, 트러블슈팅 (4)의 복구 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
-
-```bash
-# 1분 Average가 늦게 내려갈 수 있으므로, 같은 최근 10분 진단 조회를 1분 간격으로 5번 반복해 scale-in 진행 여부를 추적합니다.
-for attempt in $(seq 1 5); do
-  az monitor metrics list \
-    --resource "$APP_ID" \
-    --metric InstanceCount \
-    --interval PT1M \
-    --aggregation Average \
-    --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
-    --query "value[0].timeseries[0].data[?average != null].{time:timeStamp,count:average}" \
-    -o table
-  sleep 60
-done
-```
-
-Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Plan의 다른 앱이 추가 인스턴스를 붙잡고 있어도 지표가 늦게 내려갈 수 있습니다. 공식 동작 기준으로 축소 판단은 보통 부하 종료 후 5–10분 이후부터 시작되므로, 충분히 기다린 뒤 다시 측정합니다.
-
-### (3) `load_to_first_response_seconds`가 두 시험에서 비슷함
-
-이는 오류가 아닙니다. Prewarmed는 내부 할당·라우팅 시점과 부하 패턴에 따라 단일 실행에서 차이가 작을 수 있습니다. `first_response_age`가 약 30–40초인지 먼저 확인하고, 부하 기준 최솟값·최댓값·범위를 반복 실행의 관찰값으로 기록합니다.
-
-### (4) 실패 후 기본 상태 복구
-
-Trial A 또는 B가 중간에 실패했거나 5단계의 실험 설정 정리가 완료되지 않았다면 다음 모듈로 넘어가지 말고 아래 복구 명령을 실행합니다. 이 명령은 현재 상태와 관계없이 Prewarmed를 1로 맞추고 실험용 시작 지연을 삭제합니다.
-
-```bash
-# 새 Cloud Shell에서도 복구할 수 있도록 변수와 리소스 ID를 다시 조회합니다.
-SUFFIX=<이전에_메모한_값>
-RG=rg-appsvcworkshop-$SUFFIX
-PLAN=plan-appsvcworkshop-$SUFFIX
-APP=app-appsvcworkshop-$SUFFIX
-AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
-APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
-PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
-APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
-
-# 남아 있는 Autoscale 설정을 제거하고 Automatic Scaling을 다시 활성화합니다.
-if [ "$(az monitor autoscale list -g "$RG" --query "length([?name=='$AUTOSCALE'])" -o tsv)" != "0" ] &&
-  ! az monitor autoscale delete -g "$RG" -n "$AUTOSCALE"; then
-  echo "Plan의 Autoscale 설정 제거 실패" >&2
-  false
-else
-  # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (6) 참고).
-  az rest --method patch \
-    --uri "${PLAN_ID}?api-version=2024-11-01" \
-    --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
-    --output none
-fi
-
-# Web App 설정 복원과 시작 지연 삭제는 서로 독립적으로 실행합니다.
-# Plan-level Automatic Scaling(ON, burst 5) 복원과 별도로 Web App-level Always-ready/Prewarmed를 다시 써 두 계층을 독립적으로 정상화합니다.
-az rest --method patch \
-  --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-  --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-  --output none
-
-az webapp config appsettings delete -g "$RG" -n "$APP" \
-  --setting-names STARTUP_DELAY_SECONDS --output none
-
-# 복구 명령이 오류 없이 끝나면 5단계의 결과 해석으로 돌아갑니다.
-```
-
-### (5) hey 설치 실패
-
-`go install`은 GitHub에서 소스를 받아 빌드하므로 네트워크 일시 장애일 수 있습니다. 잠시 후 재시도하고, PATH에 `$HOME/go/bin`이 포함되어 있는지 확인합니다.
-
-```bash
-go install github.com/rakyll/hey@latest
-export PATH=$HOME/go/bin:$PATH
-command -v hey
-```
-
-### (6) Premium V2/V3 SKU만 지원한다는 오류
-
-```text
---number-of-workers and --elastic-scale can only be used on premium V2/V3 or workflow SKUs.
-['--minimum-elastic-instance-count', '--prewarmed-instance-count'] are only supported for elastic premium V2/V3 SKUs
-```
-
-P0v4가 지원되지 않는 것이 아니라 Azure CLI의 SKU 검증 로직이 Premium v4를 아직 포함하지 않아 발생하는 오류입니다. 이 모듈 1단계의 `az rest` 명령을 사용하고, 기존 `az appservice plan update --elastic-scale` 및 `az webapp update --minimum-elastic-instance-count` 명령은 실행하지 않습니다.
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| `observe_instances.py`가 2로 종료되거나 `observations` 배열이 비어 있음 | 이번 burst에서 새 instance 응답을 관찰하지 못했거나 실험 변수·부하·상태 준비가 맞지 않았습니다. | 새 세션이면 0단계에서 `SUFFIX`와 Azure 변수를 복원하고 `REPO_DIR=~/ms-appservice-basic-workshop01`인지 확인합니다.<br>`STARTUP_DELAY_SECONDS=30` 적용 후 `/health`를 확인하고, 아래 기본 상태 복구를 실행한 뒤 새 1분 `InstanceCount` 두 개가 연속 `1`일 때 2단계부터 다시 실행합니다.<br>`hey -z 180s -c 100 -q 10`을 동일하게 사용하고 Portal의 **Automatic Scaling Instance Count** 또는 `az monitor metrics list --resource "$APP_ID" --metric InstanceCount --interval PT1M --aggregation Average --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" -o table`로 scale-out을 함께 확인합니다. |
+| 시험 A 후 약 15분이 지나도 단일 인스턴스로 축소되지 않음 | 1분 메트릭 반영이 늦거나 Always-ready가 1보다 크거나 같은 Plan의 다른 앱이 인스턴스를 사용하고 있을 수 있습니다. | 시험 B를 실행하지 말고 아래 기본 상태 복구로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 적용한 뒤 멈춥니다.<br>부하 종료 5–10분 후부터 `az monitor metrics list --resource "$APP_ID" --metric InstanceCount --interval PT1M --aggregation Average --start-time "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" -o table`을 1분 간격으로 확인하고, 다시 시도할 때는 2단계부터 실행합니다. |
+| `load_to_first_response_seconds`가 두 시험에서 비슷함 | Prewarmed 효과는 내부 할당·라우팅 시점과 부하 패턴에 따라 단일 실행에서 작게 보일 수 있습니다. | 오류로 단정하지 말고 `first_response_age`가 약 30–40초인지 확인합니다.<br>부하 기준 최솟값·최댓값·범위를 기록하고 같은 조건으로 반복한 결과를 함께 해석합니다. |
+| Trial A/B 실패 후 실험 이전의 기본 상태로 돌아가야 함 | Autoscale, Automatic Scaling, Always-ready, Prewarmed 또는 시작 지연 중 일부가 실험 상태로 남았을 수 있습니다. | 새 세션이면 `SUFFIX`, `RG`, `PLAN`, `APP`, `AUTOSCALE`, `PLAN_ID`, `APP_ID`를 다시 정의합니다.<br>`az monitor autoscale list -g "$RG"`로 `$AUTOSCALE`이 있으면 `az monitor autoscale delete -g "$RG" -n "$AUTOSCALE"`로 제거합니다.<br>`az rest --method patch --uri "${PLAN_ID}?api-version=2024-11-01" --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' --output none`으로 Automatic Scaling과 maximum burst 5를 복원합니다.<br>`az rest --method patch --uri "${APP_ID}/config/web?api-version=2024-11-01" --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' --output none`으로 Always-ready 1과 Prewarmed 1을 복원합니다.<br>`az webapp config appsettings delete -g "$RG" -n "$APP" --setting-names STARTUP_DELAY_SECONDS --output none`으로 실험용 지연을 삭제합니다. 각 명령이 성공한 뒤 5단계의 결과 해석으로 돌아갑니다. |
+| `hey` 설치가 실패하거나 명령을 찾을 수 없음 | `go install`의 GitHub 다운로드가 일시적으로 실패했거나 Go 설치 경로가 `PATH`에 없습니다. | 잠시 후 `go install github.com/rakyll/hey@latest`를 다시 실행하고 `export PATH=$HOME/go/bin:$PATH`를 적용한 뒤 `command -v hey`로 확인합니다. |
+| P0v4에서 Premium V2/V3 SKU만 지원한다는 CLI 오류가 발생함 | Azure CLI의 elastic 설정 플래그가 아직 Premium v4를 SKU 검증 목록에 포함하지 않습니다. | P0v4 미지원 오류가 아닙니다.<br>이 모듈 1단계의 `az rest` 명령을 사용하고 `az appservice plan update --elastic-scale`과 `az webapp update --minimum-elastic-instance-count`는 실행하지 않습니다. |
 
 ---
 

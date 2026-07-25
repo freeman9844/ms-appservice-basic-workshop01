@@ -299,63 +299,13 @@ GET /workshop-not-found  404           false      5           2.8       4.0
 
 ## 트러블슈팅
 
-### (1) KQL 결과가 0건
-
-진단 설정 활성화 후 LAW로 데이터가 적재되기까지 **5–10분**이 소요됩니다. `ago(30m)` 범위를 `ago(1h)` 또는 `ago(24h)`로 늘려 재시도하십시오.
-
-```bash
-az monitor log-analytics query -w $LAW_CID --analytics-query \
-  'AppServiceHTTPLogs | where TimeGenerated > ago(1h) | take 10' -o table
-```
-
-### (2) `AppRequests` 테이블이 0건
-
-다음 순서로 확인합니다.
-
-1. 다음 명령으로 커넥션 스트링이 비어 있지 않고 관리형 에이전트 버전이 `~3`인지 확인합니다.
-
-   ```bash
-   az webapp config appsettings list -g $RG -n $APP \
-     --query "[?starts_with(name, 'APPLICATIONINSIGHTS') ||
-                name=='ApplicationInsightsAgent_EXTENSION_VERSION'].[name,value]" \
-     -o table
-   ```
-
-   `APPLICATIONINSIGHTS_CONNECTION_STRING`과 `ApplicationInsightsAgent_EXTENSION_VERSION` 두 항목이 모두 필요합니다.
-2. `az webapp restart -g $RG -n $APP` 으로 앱을 재시작합니다.
-3. 트래픽을 추가로 발생시킨 뒤 최소 2–3분 대기 후 재조회합니다.
-
-### (3) `az monitor log-analytics query` 명령 없음
-
-`log-analytics` 확장이 설치되지 않은 경우입니다.
-
-```bash
-az extension add --name log-analytics --upgrade --only-show-errors
-```
-
-설치 후 3단계 명령을 재실행합니다.
-
-### (4) Cloud Shell credential problem 또는 MSI token audience 오류
-
-`az monitor app-insights query`는 `https://api.applicationinsights.io` 토큰을 요청하지만 Cloud Shell에서는 **지원하지 않는 MSI token audience**일 수 있습니다. 오류 메시지의 `az logout`과 대화형 `az login`을 실행하지 말고, 4단계의 LAW 기반 `AppRequests` 쿼리를 사용합니다.
-
-```bash
-LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)
-APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)
-az monitor log-analytics query -w $LAW_CID --analytics-query \
-  "AppRequests
-   | where TimeGenerated > ago(1h)
-   | where _ResourceId =~ '$APPI_ID'
-   | summarize count=sum(ItemCount) by name=Name" -o table
-```
-
-### (5) `az monitor app-insights component show` 명령 없음
-
-`application-insights` 확장이 설치되지 않았거나 손상된 경우입니다. 아래 명령으로 재설치한 뒤 4단계를 다시 실행합니다.
-
-```bash
-az extension add --name application-insights --upgrade --only-show-errors
-```
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| KQL 쿼리 결과가 0건임 | 진단 설정 활성화 후 Log Analytics Workspace에 데이터가 적재되기까지 5–10분이 걸릴 수 있습니다. | 충분히 기다린 뒤 `ago(30m)`를 `ago(1h)` 또는 `ago(24h)`로 늘려 다시 조회합니다.<br>예: `az monitor log-analytics query -w $LAW_CID --analytics-query 'AppServiceHTTPLogs \| where TimeGenerated > ago(1h) \| take 10' -o table` |
+| `AppRequests` 테이블이 0건임 | Application Insights 연결 문자열이나 관리형 에이전트 설정이 없거나 앱 재시작·데이터 적재가 완료되지 않았습니다. | `az webapp config appsettings list -g $RG -n $APP --query "[?starts_with(name, 'APPLICATIONINSIGHTS') \|\| name=='ApplicationInsightsAgent_EXTENSION_VERSION'].[name,value]" -o table`로 `APPLICATIONINSIGHTS_CONNECTION_STRING`과 `ApplicationInsightsAgent_EXTENSION_VERSION=~3`을 확인합니다.<br>`az webapp restart -g $RG -n $APP` 후 트래픽을 만들고 2–3분 뒤 재조회합니다. |
+| `az monitor log-analytics query` 명령을 찾을 수 없음 | `log-analytics` 확장이 설치되지 않았습니다. | `az extension add --name log-analytics --upgrade --only-show-errors`로 설치한 뒤 쿼리를 다시 실행합니다. |
+| Cloud Shell에서 credential problem 또는 MSI token audience 오류가 발생함 | `az monitor app-insights query`가 요청하는 `https://api.applicationinsights.io` audience를 Cloud Shell MSI가 지원하지 않을 수 있습니다. | 오류 메시지에 나온 `az logout`이나 대화형 `az login`을 실행하지 않습니다.<br>`LAW_CID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query customerId -o tsv)`와 `APPI_ID=$(az monitor app-insights component show -g $RG --app $APPI --query id -o tsv)`를 구한 뒤 4단계의 LAW 기반 `AppRequests` 쿼리를 사용합니다. |
+| `az monitor app-insights component show` 명령을 찾을 수 없음 | `application-insights` 확장이 없거나 손상되었습니다. | `az extension add --name application-insights --upgrade --only-show-errors`로 재설치한 뒤 4단계를 다시 실행합니다. |
 
 ---
 

@@ -204,40 +204,11 @@ curl -s $APP_URL/cache | jq   # visits 증가 확인
 
 ## 트러블슈팅
 
-### (1) 사이드카 부착 후 `/cache`가 계속 `unavailable` 반환
-
-Redis 컨테이너가 아직 기동 중이거나 앱이 재시작 중입니다.
-
-- `az webapp sitecontainers list`로 컨테이너 상태를 확인합니다.
-- 60초를 더 기다린 뒤 재시도합니다.
-- 계속 실패하면 `az webapp restart`를 다시 실행하고 대기합니다.
-
-### (2) 이미지 pull 실패 또는 컨테이너 기동 오류
-
-MCR 미러 이미지 경로 또는 태그가 잘못되었을 수 있습니다.
-
-```bash
-# 태그 목록 확인
-curl -s https://mcr.microsoft.com/v2/mirror/docker/library/redis/tags/list | jq '.tags | .[-5:]'
-```
-
-태그를 확인한 뒤 올바른 태그로 사이드카를 다시 생성합니다.
-
-### (3) `az webapp sitecontainers` 명령 없음
-
-`az version`을 확인하고 Azure CLI를 최신 버전으로 업그레이드합니다.
-
-```bash
-az upgrade --only-show-errors
-```
-
-업그레이드 후에도 명령이 없으면 REST API로 직접 생성합니다.
-
-```bash
-az rest --method put \
-  --url "https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/sitecontainers/redis?api-version=2024-04-01" \
-  --body '{"properties":{"image":"mcr.microsoft.com/mirror/docker/library/redis:7.2","isMain":false}}'
-```
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| 사이드카 부착 후 `/cache`가 계속 `unavailable`을 반환함 | Redis 컨테이너가 기동 중이거나 Web App 재시작이 아직 완료되지 않았습니다. | `az webapp sitecontainers list -g $RG -n $APP`로 상태를 확인하고 60초 뒤 재시도합니다.<br>계속 실패하면 `az webapp restart -g $RG -n $APP`를 실행하고 다시 기다립니다. |
+| Redis 이미지 pull 실패 또는 컨테이너 기동 오류가 발생함 | MCR 미러 이미지 경로나 태그가 잘못되었습니다. | `curl -s https://mcr.microsoft.com/v2/mirror/docker/library/redis/tags/list \| jq '.tags \| .[-5:]'`로 태그를 확인하고 올바른 태그로 사이드카를 다시 생성합니다. |
+| `az webapp sitecontainers` 명령을 찾을 수 없음 | 설치된 Azure CLI가 sitecontainers 명령을 지원하지 않는 이전 버전입니다. | `az version`을 확인하고 `az upgrade --only-show-errors`로 업그레이드합니다.<br>계속 사용할 수 없으면 `az rest --method put --url "https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG/providers/Microsoft.Web/sites/$APP/sitecontainers/redis?api-version=2024-04-01" --body '{"properties":{"image":"mcr.microsoft.com/mirror/docker/library/redis:7.2","isMain":false}}'`로 생성합니다. |
 
 ---
 

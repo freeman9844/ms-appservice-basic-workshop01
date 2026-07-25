@@ -125,31 +125,11 @@ rm -f $HOME/go/bin/hey
 
 ## 트러블슈팅
 
-### (1) RG 삭제 지연 — `az group exists`가 계속 `true` 반환
-
-`--no-wait`로 삭제를 시작했으므로 수 분이 소요되는 것은 정상입니다. 1–2분 간격으로 재확인합니다.
-
-```bash
-az group exists -n $RG
-```
-
-### (2) Entra 앱 등록 삭제 권한 오류
-
-앱 등록 소유자 확인 후 재시도합니다.
-
-```bash
-az ad app owner list --id $CLIENT_ID --query "[].userPrincipalName" -o tsv
-```
-
-본인이 소유자가 아니라면 테넌트 관리자에게 문의하십시오.
-
-### (3) SUFFIX 분실
-
-SUFFIX를 기억하지 못하는 경우 아래 명령으로 RG 이름을 조회합니다.
-
-```bash
-az group list --query "[?starts_with(name,'rg-appsvcworkshop')]"
-```
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| `az group exists`가 계속 `true`를 반환함 | `--no-wait`로 시작한 리소스 그룹 삭제는 완료까지 수 분이 걸릴 수 있습니다. | 1–2분 간격으로 `az group exists -n $RG`를 다시 실행해 `false`가 되는지 확인합니다. |
+| Entra 앱 등록 삭제가 권한 오류로 실패함 | 현재 계정이 해당 앱 등록의 소유자가 아닐 수 있습니다. | `az ad app owner list --id $CLIENT_ID --query "[].userPrincipalName" -o tsv`로 소유자를 확인합니다.<br>본인이 소유자가 아니면 테넌트 관리자에게 삭제를 요청합니다. |
+| 정리할 리소스의 `SUFFIX`를 잊어버림 | 이전 Cloud Shell 세션의 환경 변수가 사라졌습니다. | `az group list --query "[?starts_with(name,'rg-appsvcworkshop')]"`로 워크숍 리소스 그룹을 찾고 이름 끝의 값을 `SUFFIX`로 복원합니다. |
 
 ---
 
