@@ -364,9 +364,11 @@ fi
 📋 **예상 출력**
 
 ```text
-관찰 01/12 capacity=1 latest_cpu=pending
-...
-관찰 04/12 capacity=2 latest_cpu=95.4
+관찰 01/12 capacity=1 latest_cpu=4.0
+관찰 02/12 capacity=1 latest_cpu=45.0
+관찰 03/12 capacity=1 latest_cpu=45.0
+관찰 04/12 capacity=2 latest_cpu=79.0
+[1]+  Done                    hey -n 9 -c 1 -t 40 "$APP_URL/load?sec=20" > "$LOAD_OUT"
 scaled_out=1 hey_exit=0
 ```
 
