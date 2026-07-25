@@ -599,7 +599,7 @@ observer exit=0, hey exit=0, metric exit=0
 
 ---
 
-## 5단계 — 실험 설정 정리 및 결과 해석
+## 5단계 — 결과 해석
 
 먼저 확인할 것은 **Automatic Scaling의 scale-out 자체가 두 시험 모두에서 동작했다는 사실**입니다. 각 시험에서 burst 부하에 따라 `InstanceCount`가 1에서 Maximum burst 5까지 증가했고, 기준 instance 외 새 instance 4개가 실제 응답에 투입됐습니다. 이 scale-out 성공을 전제로, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
 
@@ -619,107 +619,10 @@ else
 fi
 ```
 
-🟢 **실행 — 정리 후 상태 확인**
-
-```bash
-# Automatic Scaling 전체 설정과 실험용 시작 지연 삭제를 단언합니다.
-VERIFY_STATUS=0
-# 정리 후 검증은 현재 리소스 상태를 다시 읽어야 하므로 Plan ID와 Web App ID를 둘 다 fresh 조회합니다.
-if ! PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv); then
-  echo "Plan 리소스 ID 조회 실패" >&2
-  VERIFY_STATUS=1
-fi
-if ! APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv); then
-  echo "Web App 리소스 ID 조회 실패" >&2
-  VERIFY_STATUS=1
-fi
-
-if [ "$VERIFY_STATUS" -eq 0 ]; then
-  # Plan 상태만 az rest로 조회합니다. CLI 조회는 Premium v4의 elastic 속성을 반환하지 않습니다.
-  if ! PLAN_SCALE=$(az rest --method get \
-    --uri "${PLAN_ID}?api-version=2024-11-01" \
-    --query "properties.{automaticScaling:elasticScaleEnabled,maximumBurst:maximumElasticWorkerCount}" -o json)
-  then
-    echo "Plan 상태 조회 실패" >&2
-    VERIFY_STATUS=1
-  fi
-  if ! APP_SCALE=$(az webapp show -g "$RG" -n "$APP" \
-    --query "siteConfig.{alwaysReady:minimumElasticInstanceCount,prewarmed:preWarmedInstanceCount}" -o json)
-  then
-    echo "Web App 상태 조회 실패" >&2
-    VERIFY_STATUS=1
-  fi
-fi
-
-# STARTUP_DELAY_SECONDS가 실제로 제거됐는지 app settings 목록에서 세고, Plan 대상 Autoscale이 0개인지 다시 셉니다.
-if ! STARTUP_DELAY_COUNT=$(az webapp config appsettings list -g "$RG" -n "$APP" \
-  --query "length([?name=='STARTUP_DELAY_SECONDS'])" -o tsv)
-then
-  echo "앱 설정 조회 실패" >&2
-  VERIFY_STATUS=1
-fi
-if ! AUTOSCALE_COUNT=$(az monitor autoscale list -g "$RG" \
-  --query "length([?name=='$AUTOSCALE'])" -o tsv)
-then
-  echo "Autoscale 설정 조회 실패" >&2
-  VERIFY_STATUS=1
-fi
-
-if [ "$VERIFY_STATUS" -eq 0 ]; then
-  printf '%s\n%s\n' "$PLAN_SCALE" "$APP_SCALE"
-  echo "STARTUP_DELAY_SECONDS count=$STARTUP_DELAY_COUNT"
-  echo "Autoscale setting count=$AUTOSCALE_COUNT"
-
-  # 최종 5/1/1과 startup delay 0개, Plan 대상 Autoscale 0개를 모두 만족해야만 실험 정리가 끝난 것으로 인정합니다.
-  if ! jq -e '.automaticScaling == true and .maximumBurst == 5' \
-    >/dev/null <<< "$PLAN_SCALE" ||
-    ! jq -e '.alwaysReady == 1 and .prewarmed == 1' \
-      >/dev/null <<< "$APP_SCALE" ||
-    [ "$STARTUP_DELAY_COUNT" != "0" ] ||
-    [ "$AUTOSCALE_COUNT" != "0" ]
-  then
-    VERIFY_STATUS=1
-  fi
-fi
-
-if [ "$VERIFY_STATUS" -ne 0 ]; then
-  echo "정리 후 상태 불일치: 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
-fi
-
-if [ "$VERIFY_STATUS" -eq 0 ]; then
-  # 설정값이 맞더라도 시작 지연 삭제로 재시작 중일 수 있으므로 마지막으로 /health readiness를 polling해 실제 앱 응답까지 확인합니다.
-  for attempt in $(seq 1 18); do
-    if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
-      break
-    fi
-    if [ "$attempt" -eq 18 ]; then
-      echo "정리 후 /health 확인 실패" >&2
-      VERIFY_STATUS=1
-      break
-    fi
-    sleep 5
-  done
-fi
-
-# 이 검사가 블록의 최종 종료 코드가 되어 조회·상태·health 실패를 보존합니다.
-[ "$VERIFY_STATUS" -eq 0 ]
-```
-
 📋 **예상 출력**
 
 ```text
 STARTUP_DELAY_SECONDS 삭제 완료
-{
-  "automaticScaling": true,
-  "maximumBurst": 5
-}
-{
-  "alwaysReady": 1,
-  "prewarmed": 1
-}
-STARTUP_DELAY_SECONDS count=0
-Autoscale setting count=0
-{"status":"ok"}
 ```
 
 🟢 **실행 — InstanceCount 타임라인 출력**
@@ -935,7 +838,7 @@ az rest --method patch \
 az webapp config appsettings delete -g "$RG" -n "$APP" \
   --setting-names STARTUP_DELAY_SECONDS --output none
 
-# 복구 후 5단계의 "정리 후 상태 확인" 블록을 다시 실행합니다.
+# 복구 명령이 오류 없이 끝나면 5단계의 결과 해석으로 돌아갑니다.
 ```
 
 ### (5) hey 설치 실패
