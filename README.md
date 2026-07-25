@@ -32,7 +32,7 @@ flowchart LR
 6. Azure Monitor Autoscale의 CPU 규칙을 구성하고 Plan scale-out을 관찰할 수 있다.
 7. 진단 설정을 통해 Log Analytics KQL 조회와 App Insights 텔레메트리를 활용할 수 있다.
 8. 사용한 리소스를 모두 정리하고 비용 발생을 종료할 수 있다.
-9. (선택) Autoscale을 Automatic Scaling으로 전환하고 Prewarmed 0/4에서 부하 시작 후 새 인스턴스 최초 응답까지 걸린 시간을 비교할 수 있다.
+9. (선택) Autoscale을 Automatic Scaling으로 전환하고 Prewarmed 0/1에서 부하 시작 후 새 인스턴스 최초 응답까지 걸린 시간을 비교할 수 있다.
 10. (선택) Easy Auth(Entra ID)로 코드 수정 없이 인증 게이트를 구성하고 `/.auth/me`로 클레임을 확인할 수 있다.
 11. (선택) sitecontainers API로 Redis 사이드카를 부착하고 `/cache` 동작을 확인할 수 있다.
 12. (선택) Auto-heal 규칙을 구성하고 자동 재활용 이벤트를 로그에서 확인할 수 있다.
@@ -73,14 +73,14 @@ flowchart LR
 
 | # | 모듈 | 한 줄 설명 |
 |---|------|------------|
-| 09 | [(선택) Automatic Scaling · Prewarmed A/B](docs/09-prewarmed-ab.md) | Autoscale 제거 → Automatic Scaling 활성화 → Prewarmed 0/4 응답 지연 비교 |
+| 09 | [(선택) Automatic Scaling · Prewarmed A/B](docs/09-prewarmed-ab.md) | Autoscale 제거 → Automatic Scaling 활성화 → Prewarmed 0/1 응답 지연 비교 |
 | 10 | [(선택) 인증 (Easy Auth)](docs/10-easy-auth.md) | Entra 앱 등록 → `az webapp auth` 구성 → 로그인 게이트 → `/.auth/me` |
 | 11 | [(선택) 사이드카 컨테이너](docs/11-sidecar-option.md) | sitecontainers API로 Redis 사이드카 부착 → `/cache` 방문 카운터 동작 확인 |
 | 12 | [(선택) Auto-heal & 진단](docs/12-autoheal-option.md) | `/slow` 반복 → Auto-heal 재활용 규칙 → 재활용 이벤트 확인, 진단 블레이드 소개 |
 
 ### 선택 모듈, 무엇을 고를까?
 
-**09 Automatic Scaling · Prewarmed A/B**는 07의 규칙 기반 Autoscale을 App Service의 HTTP 기반 Automatic Scaling으로 전환하고 Prewarmed를 깊게 관찰하는 실험입니다. 60초 시작 지연을 적용한 뒤 Prewarmed 0과 4에서 부하 시작부터 새 인스턴스 최초 응답까지 걸린 시간을 `hey`, 두 Python observer, Azure Monitor `InstanceCount`로 비교하며 약 22–38분이 걸립니다. 07 직후 수행하면 상태 전환이 가장 명확합니다.
+**09 Automatic Scaling · Prewarmed A/B**는 07의 규칙 기반 Autoscale을 App Service의 HTTP 기반 Automatic Scaling으로 전환하고 Prewarmed를 깊게 관찰하는 실험입니다. 30초 시작 지연을 적용한 뒤 Prewarmed 0과 Microsoft 권장 기본값 1에서 부하 시작부터 새 인스턴스 최초 응답까지 걸린 시간을 `hey`, 두 Python observer, Azure Monitor `InstanceCount`로 비교하며 약 22–38분이 걸립니다. 07 직후 수행하면 상태 전환이 가장 명확합니다.
 
 10–12 세 모듈은 순서 의존성 없이 **어떤 조합으로든** 건너뛰거나 골라 진행할 수 있습니다(단, 10 수행 후 11·12 진행 시 첫 단계에서 Easy Auth를 비활성화하며, 이 상태는 13 정리까지 유지됩니다).
 
@@ -124,7 +124,7 @@ flowchart LR
 
 | 리소스 | 과금 방식 | 비고 |
 |--------|-----------|------|
-| App Service Plan P0v4 (Linux) | 활성·Prewarmed 인스턴스 할당 시간 기준 과금 | 슬롯 추가 과금 없음(같은 Plan 공유); 09에서 Prewarmed 4를 일시 사용하며 할당 시간은 초 단위로 청구 |
+| App Service Plan P0v4 (Linux) | 활성·Prewarmed 인스턴스 할당 시간 기준 과금 | 슬롯 추가 과금 없음(같은 Plan 공유); 09에서 Prewarmed 1이 할당되면 해당 시간은 초 단위로 청구 |
 | Log Analytics Workspace | 수집 데이터 GB 단위 과금 | 실습 수준 데이터 소량 |
 | Application Insights (workspace-based) | 수집 데이터 GB 단위 과금 | 실습 수준 소량 |
 | Entra ID 앱 등록 | 무료 | 13 정리에서 삭제 필수 |
