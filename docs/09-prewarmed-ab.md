@@ -418,13 +418,16 @@ fi
 
 ```text
 metric_timestamp	observed_at	instance_count
-Prewarmed=0 load_started_at: 2026-07-25T07:00:00Z
 instance	load_started_at	first_seen_at	load_to_first_response_seconds	started_at	first_response_age
-2026-07-25T06:59:00Z	2026-07-25T07:00:10Z	1
-a2b002c6	2026-07-25T07:00:00Z	2026-07-25T07:01:08Z	68	2026-07-25T07:00:07Z	61
-5bef3ff3	2026-07-25T07:00:00Z	2026-07-25T07:01:16Z	76	2026-07-25T07:00:15Z	61
+2026-07-25T07:52:00Z	2026-07-25T07:52:45Z	1
+2026-07-25T07:53:00Z	2026-07-25T07:53:17Z	1
+d09f4aa4	2026-07-25T07:52:43Z	2026-07-25T07:53:34Z	51	2026-07-25T07:52:57Z	37
+c0b2201f	2026-07-25T07:52:43Z	2026-07-25T07:53:43Z	60	2026-07-25T07:53:07Z	36
+dbaea6a9	2026-07-25T07:52:43Z	2026-07-25T07:53:51Z	68	2026-07-25T07:53:14Z	37
+5bef3ff3	2026-07-25T07:52:43Z	2026-07-25T07:53:51Z	68	2026-07-25T07:53:18Z	33
+2026-07-25T07:55:00Z	2026-07-25T07:55:23Z	5
 [2]+  Done                    hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$AB_DIR/hey-burst-0.out"
-2026-07-25T07:02:00Z	2026-07-25T07:02:40Z	5
+2026-07-25T07:56:00Z	2026-07-25T07:56:26Z	5
 [1]+  Done                    python3 "$REPO_DIR/scripts/observe_scaling_metric.py" --resource "$APP_ID" --duration 240 --poll-interval 30 --output "$NO_PREWARM_METRICS"
 observer exit=0, hey exit=0, metric exit=0
 ```
