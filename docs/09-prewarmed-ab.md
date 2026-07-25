@@ -734,20 +734,22 @@ Prewarmed=4	3122a953	2026-07-25T08:10:35Z	2026-07-25T08:11:36Z	61	2026-07-25T08:
 
 🟢 **실행 — 관찰 범위 요약**
 
-> 👁️ 두 JSON의 `load_to_first_response_seconds`를 시험별로 정렬하여 표본 수, 최솟값, 최댓값, 범위를 계산합니다. 최솟값은 첫 새 capacity 투입, 최댓값과 범위는 마지막 capacity 투입과 응답 시점의 분산을 보여줍니다.
+> 👁️ 두 JSON의 `load_to_first_response_seconds`를 시험별로 정렬하여 표본 수, 최솟값, 평균, 최댓값, 범위를 계산합니다. 최솟값은 첫 새 instance 응답, 최댓값은 마지막 새 instance 응답, 범위는 신규 capacity가 응답에 투입된 시점의 분산을 보여줍니다.
 
 ```bash
-# A/B 관찰 범위와 파일 유효성을 요약해 비교 가능한 결과인지 확인합니다.
+# A/B의 부하 시작 기준 응답 지연을 한 줄씩 요약해 비교합니다.
 # `jq -s`는 Trial A/B 두 JSON 파일을 한 번에 slurp해 trial별 부하 기준 지연을 집계합니다.
 jq -s -r '
-  ["trial","samples","min_load_delay","max_load_delay","range"],
+  ["trial","samples","min_load_delay","avg_load_delay","max_load_delay","range"],
   (to_entries[] |
     .key as $trial_index |
     (.value.observations | map(.load_to_first_response_seconds) | sort) as $delays |
+    ($delays | add / length) as $average |
     [
       (if $trial_index == 0 then "Prewarmed=0" else "Prewarmed=4" end),
       ($delays | length),
       $delays[0],
+      (($average * 10 | round) / 10),
       $delays[-1],
       ($delays[-1] - $delays[0])
     ]
@@ -758,33 +760,32 @@ jq -s -r '
 📋 **예상 출력 형식**
 
 ```text
-trial	samples	min_load_delay	max_load_delay	range
-Prewarmed=0	4	51	68	17
-Prewarmed=4	4	54	61	7
+trial	samples	min_load_delay	avg_load_delay	max_load_delay	range
+Prewarmed=0	4	51	61.8	68	17
+Prewarmed=4	4	54	55.8	61	7
 ```
 
-이 실행에서 Prewarmed=4의 최소 지연 54초는 Prewarmed=0의 51초보다 3초 늦었지만, 최대 지연은 68초에서 61초로 7초 줄었고 범위는 17초에서 7초로 좁아졌습니다. 평균도 61.8초에서 55.8초로 약 6초 감소했습니다. 따라서 “모든 instance가 더 빨랐다”가 아니라 **새 capacity의 응답 투입이 더 조밀하고 최악 지연이 낮아졌다**는 관찰로 해석합니다.
+### 관찰된 효과
 
-### 무엇이 Prewarmed의 이점인가
+- **첫 응답:** 최솟값은 51초에서 54초로 3초 늘었습니다. 따라서 Prewarmed=4에서 모든 새 instance가 더 빨랐다고 해석할 수는 없습니다.
+- **평균·최악 지연:** 평균은 61.8초에서 55.8초로 약 6초, 최댓값은 68초에서 61초로 7초 줄었습니다.
+- **응답 시점의 분산:** 범위는 17초에서 7초로 좁아졌고, Trial B에서는 신규 4개 중 3개가 같은 54초에 처음 응답했습니다.
 
-Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)는 Prewarmed instance를 HTTP scale·activation 시 사용하는 **warmed capacity buffer**로 설명합니다. 앱이 유휴 상태일 때 설정값 4개를 항상 실행하는 것이 아니라, HTTP 요청으로 활성 인스턴스가 사용되기 시작하면 버퍼를 할당하고 활성 capacity가 늘어날 때 다시 채웁니다. 할당된 Prewarmed 인스턴스는 초 단위 과금 대상입니다.
+이번 실행에서 관찰된 핵심은 개별 instance가 항상 빨라진 것이 아니라, **새 capacity의 응답 투입이 더 조밀해지고 최악 지연이 낮아졌다는 점**입니다.
 
-### capacity 증가와 새 응답 instance를 함께 보는 법
+### 동작 원리
 
-1. instance 표의 `load_started_at`을 두 시험의 시간 원점으로 사용합니다.
-2. `load_to_first_response_seconds`의 최솟값과 최댓값으로 첫·마지막 새 instance 응답 투입 시점을 비교합니다.
-3. `first_response_age`가 약 60초인지 확인하여 의도한 인위적 시작 지연이 적용됐는지 봅니다. 약 30–40초라면 이전 30초 상한 앱이 배포된 상태이므로 60초 실험으로 해석하지 않습니다.
-4. `InstanceCount`가 증가한 `metric_timestamp`를 보조적으로 나란히 놓되 정확한 activation 시각으로 해석하지 않습니다.
+Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)는 Prewarmed instance를 HTTP scale·activation에 사용하는 **warmed capacity buffer**로 설명합니다. 앱이 유휴 상태일 때 설정값만큼 항상 실행해 두는 방식이 아니라, HTTP 요청으로 활성 instance가 사용되기 시작하면 buffer를 할당하고 활성 capacity가 증가할 때 다시 채우는 rolling 방식입니다.
 
-Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST API 이름은 `InstanceCount`입니다. 이 메트릭은 앱이 실행되는 VM 수를 나타내며 배포된 Prewarmed instance를 포함할 수 있지만, 개별 instance의 active/Prewarmed 상태나 instance ID는 제공하지 않습니다. 또한 `PT1M` Average 집계와 Azure Monitor 수집 지연이 있으므로 `metric_timestamp`를 Azure 내부의 정확한 activation 시각으로 해석할 수 없습니다. 응답에서 관찰된 instance 수가 적다는 사실도 capacity 효율 향상을 의미하지 않습니다. 이 타임라인은 부하 중 전체 capacity 변화 흐름을 이해하기 위한 보조 증거이며 Prewarmed 효과의 인과관계 증명은 아닙니다.
+따라서 이 실험은 “설정한 4개가 부하 전에 모두 대기했는가”가 아니라, 부하가 들어온 뒤 신규 capacity가 실제 응답에 얼마나 빠르고 고르게 투입됐는지를 비교합니다. 할당된 Prewarmed instance는 초 단위 과금 대상이므로 실험 후 기본값 1로 복원합니다.
 
-### 결과 해석 기준
+### 해석 시 주의사항
 
-- Trial B의 `min_load_delay`가 낮으면 첫 warmed capacity가 Trial A보다 빨리 응답에 투입된 관찰입니다.
-- Trial B의 `max_load_delay`와 `range`가 낮으면 여러 새 instance의 응답 투입이 더 이르고 조밀하게 나타난 관찰입니다.
-- 두 시험의 `first_response_age`가 모두 약 60초라면 동일한 의도된 cold-start floor가 적용된 것입니다. 모두 약 30–40초라면 A/B 조건은 같지만 이전 30초 상한 앱으로 실행된 것이므로 최신 앱 재배포 후 반복해야 합니다.
-- 두 시험 결과가 비슷해도 실행 실패는 아닙니다. 플랫폼 내부 할당 시점, 부하 분산, 수집 시점의 변동이 단일 실행의 차이를 가릴 수 있습니다.
-- `InstanceCount`는 두 시험 모두 최종 5까지 증가했는지 확인하는 보조 증거이며, `PT1M` Average와 게시 지연 때문에 내부 scale-out 속도 자체를 판정하는 지표가 아닙니다.
+- **비교 전제:** 두 시험 모두 기준 instance를 제외한 신규 instance 4개가 기록됐을 때 평균·최댓값·범위를 직접 비교합니다. 표본 수가 다르거나 4보다 적으면 관찰 누락일 수 있으며, 적게 관찰된 것 자체는 capacity 효율 향상을 뜻하지 않습니다.
+- **주 지표:** `load_to_first_response_seconds`로 부하 시작부터 각 새 instance의 최초 응답까지 걸린 시간을 비교합니다.
+- **실험 조건 확인:** `first_response_age`가 약 60초면 의도한 시작 지연이 적용된 것입니다. 두 시험 모두 약 30–40초라면 A/B 조건은 같지만 이전 30초 상한 앱으로 실행된 것이므로 최신 앱 재배포 후 반복합니다.
+- **보조 지표:** Azure Portal의 **Automatic Scaling Instance Count**와 REST API의 `InstanceCount`는 최종 capacity가 5까지 증가했는지 확인하는 데 사용합니다. `PT1M` Average와 게시 지연이 있으므로 정확한 activation 시각이나 개별 instance의 active/Prewarmed 상태를 판정할 수는 없습니다.
+- **단일 실행의 한계:** 플랫폼 내부 할당 시점, 부하 분산, 관찰 시점에 따라 차이가 작거나 반대로 나타날 수 있습니다. 이번 결과는 Prewarmed가 항상 우수하다는 증명이 아니라, 해당 실행에서 확인한 외부 관찰값입니다.
 
 ---
 
