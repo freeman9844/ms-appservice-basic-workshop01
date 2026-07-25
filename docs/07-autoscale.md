@@ -376,21 +376,6 @@ scaled_out=1 hey_exit=0
 
 ---
 
-## 7단계 — scale-in 규칙 확인
-
-🟢 **실행**
-
-```bash
-# 실제 축소를 기다리지 않고 scale-in 규칙이 정확한지만 확인합니다.
-az monitor autoscale show -g "$RG" -n "$AUTOSCALE" \
-  --query "profiles[0].rules[?scaleAction.direction=='Decrease'].{metric:metricTrigger.metricName,operator:metricTrigger.operator,threshold:metricTrigger.threshold,timeWindow:metricTrigger.timeWindow,value:scaleAction.value,cooldown:scaleAction.cooldown}" \
-  -o table
-```
-
-> 👁️ 이 핸즈온에서는 축소 완료를 기다리지 않습니다. CPU가 10% 아래로 1분 유지되면 Autoscale이 cooldown을 적용하며 최소 1까지 줄입니다.
-
----
-
 ## 트러블슈팅
 
 ### scale-out이 관찰되지 않음
