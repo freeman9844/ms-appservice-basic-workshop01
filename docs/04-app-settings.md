@@ -136,27 +136,11 @@ WELCOME_MESSAGE                 안녕하세요, App Service 워크숍!     Fals
 
 ## 트러블슈팅
 
-### (1) 메시지가 반영되지 않음
-
-설정 변경 후 앱 재시작이 완료되기까지 30–60초가 소요됩니다.
-`started_at`이 아직 변경되지 않았다면 대기 후 재시도합니다.
-브라우저 캐시가 원인일 수도 있으므로 **강제 새로고침** (Windows: `Ctrl+F5`, macOS: `Cmd+Shift+R`)을 시도합니다.
-
-### (2) 따옴표 이스케이프 오류
-
-한글·공백·특수문자가 포함된 값은 반드시 **큰따옴표**로 감쌉니다.
-
-```bash
-# 올바른 예
---settings WELCOME_MESSAGE="안녕하세요, App Service 워크숍!"
-
-# 잘못된 예 (공백·쉼표 미처리 — 오류 발생)
---settings WELCOME_MESSAGE=안녕하세요, App Service 워크숍!
-```
-
-### (3) `jq` 명령어를 찾을 수 없음
-
-Cloud Shell에는 `jq`가 기본 설치되어 있습니다. 로컬 터미널 사용 시 `sudo apt-get install jq` (Ubuntu) 또는 `brew install jq` (macOS)로 설치합니다.
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| 앱 설정을 변경했지만 새 메시지가 표시되지 않음 | 설정 변경에 따른 앱 재시작이 진행 중이거나 브라우저 캐시가 남아 있습니다. | `started_at`이 변경될 때까지 30–60초 기다린 뒤 재시도합니다.<br>Windows는 `Ctrl+F5`, macOS는 `Cmd+Shift+R`로 강제 새로고침합니다. |
+| 한글·공백·특수문자가 포함된 설정값에서 구문 오류가 발생함 | 설정값을 큰따옴표로 감싸지 않아 셸이 값을 여러 인자로 해석했습니다. | `--settings WELCOME_MESSAGE="안녕하세요, App Service 워크숍!"`처럼 전체 값을 큰따옴표로 감쌉니다. |
+| `jq` 명령을 찾을 수 없음 | Cloud Shell이 아닌 로컬 터미널에 `jq`가 설치되지 않았습니다. | Ubuntu에서는 `sudo apt-get install jq`, macOS에서는 `brew install jq`로 설치합니다. |
 
 ---
 

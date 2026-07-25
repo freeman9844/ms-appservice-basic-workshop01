@@ -163,52 +163,11 @@ https://app-appsvcworkshop-XXXXX.azurewebsites.net
 
 ## 트러블슈팅
 
-### (1) 앱 이름 전역 중복 오류
-
-Web App 이름(`$APP`)은 `azurewebsites.net` 도메인에서 **전 세계적으로 고유** 해야 합니다.
-`The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생하면 새 난수를 생성하여 변수 전체를 재정의하고 명령을 재실행합니다.
-
-```bash
-# 새 SUFFIX를 선택하면 이 리소스 그룹 이름도 다시 만들어야 하므로, 기존 그룹을 재사용하지 않고 새 이름으로 재생성합니다.
-SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))
-RG=rg-appsvcworkshop-$SUFFIX
-PLAN=plan-appsvcworkshop-$SUFFIX
-APP=app-appsvcworkshop-$SUFFIX
-LAW=log-appsvcworkshop-$SUFFIX
-APPI=appi-appsvcworkshop-$SUFFIX
-echo "SUFFIX=$SUFFIX"
-```
-
-### (2) P0v4 SKU를 사용할 수 없음
-
-Premium V4는 일부 리전과 App Service 배포 단위에서만 제공됩니다. 아래 명령으로 Linux P0v4 지원 리전을 확인합니다(Azure CLI 2.73.0 이상).
-
-```bash
-az appservice list-locations --linux-workers-enabled --sku P0V4 -o table
-```
-
-목록에 **Korea Central**이 없거나 `P0V4` 생성이 실패하면, 출력에 표시된 지원 리전을 선택하고 새로운 `SUFFIX`로 리소스 이름을 다시 정의한 뒤 1단계를 재실행합니다.
-
-```bash
-# 새 SUFFIX를 쓰면 리소스 이름 전체가 바뀌므로, 기존 값들을 다시 계산해 새 리소스 이름으로 맞춥니다.
-SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))
-LOC=eastasia     # 예시: 위 명령에서 확인한 지원 리전
-RG=rg-appsvcworkshop-$SUFFIX
-PLAN=plan-appsvcworkshop-$SUFFIX
-APP=app-appsvcworkshop-$SUFFIX
-LAW=log-appsvcworkshop-$SUFFIX
-APPI=appi-appsvcworkshop-$SUFFIX
-```
-
-### (3) `application-insights` 확장 명령 없음
-
-`az monitor app-insights` 명령을 찾을 수 없는 경우 확장이 설치되지 않은 것입니다.
-
-```bash
-az extension add --name application-insights --upgrade --only-show-errors
-```
-
-설치 후 명령을 재실행합니다.
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| `The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생함 | Web App 이름은 `azurewebsites.net` 도메인에서 전 세계적으로 고유해야 합니다. | 새 `SUFFIX`를 생성하고 기존 리소스 그룹을 재사용하지 말고 `RG`, `PLAN`, `APP`, `LAW`, `APPI`를 모두 다시 정의한 뒤 1단계를 재실행합니다.<br>`SUFFIX=$(printf "%05d" $(( (RANDOM * 32768 + RANDOM) % 100000 )))` |
+| Korea Central에서 P0v4 SKU를 만들 수 없음 | Premium V4는 일부 리전과 App Service 배포 단위에서만 제공됩니다. | Azure CLI 2.73.0 이상에서 `az appservice list-locations --linux-workers-enabled --sku P0V4 -o table`로 지원 리전을 확인합니다.<br>지원 리전을 `LOC`로 선택하고 새 `SUFFIX`와 `RG`, `PLAN`, `APP`, `LAW`, `APPI`를 다시 정의한 뒤 1단계를 재실행합니다. |
+| `az monitor app-insights` 명령을 찾을 수 없음 | `application-insights` 확장이 설치되지 않았습니다. | `az extension add --name application-insights --upgrade --only-show-errors`로 설치한 뒤 명령을 다시 실행합니다. |
 
 ---
 

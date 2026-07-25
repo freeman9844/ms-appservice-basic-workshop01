@@ -177,17 +177,11 @@ v2
 
 ## 트러블슈팅
 
-### (1) 분포가 0/100 — v2 요청이 전혀 없거나 v1 요청이 전혀 없음
-
-`traffic-routing set` 직후 전파에 수십 초가 소요될 수 있습니다. `az webapp traffic-routing show -g $RG -n $APP -o table`로 설정이 반영되었는지 확인한 뒤 30초 대기 후 재시도합니다.
-
-### (2) 브라우저에서 버전 비율이 바뀌지 않음
-
-`x-ms-routing-name` 쿠키가 sticky로 동작하기 때문입니다. 처음 배정된 슬롯에 계속 연결되는 것이 정상입니다. 시크릿 창을 열거나 쿠키를 삭제하면 재분배됩니다.
-
-### (3) 스왑 후에도 일부 트래픽이 구 버전으로 라우팅됨
-
-`traffic-routing clear`를 실행하지 않고 스왑한 경우입니다. 라우팅 비율이 스왑 후에도 유지되므로, `az webapp traffic-routing clear -g $RG -n $APP`를 즉시 실행하십시오.
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| 트래픽 분포가 0/100으로 나타나 v1 또는 v2 요청이 전혀 없음 | `traffic-routing set` 직후 설정 전파에 수십 초가 걸릴 수 있습니다. | `az webapp traffic-routing show -g $RG -n $APP -o table`로 설정 반영 여부를 확인하고 30초 후 여러 요청으로 다시 측정합니다. |
+| 브라우저에서 요청해도 버전 비율이 바뀌지 않음 | `x-ms-routing-name` 쿠키가 sticky로 동작해 처음 배정된 슬롯에 계속 연결됩니다. | 시크릿 창을 열거나 `x-ms-routing-name` 쿠키를 삭제한 뒤 다시 요청합니다. |
+| 스왑 후에도 일부 트래픽이 구 버전으로 라우팅됨 | `traffic-routing clear` 없이 스왑하여 기존 라우팅 비율이 유지되고 있습니다. | `az webapp traffic-routing clear -g $RG -n $APP`를 즉시 실행하고 반복 요청으로 라우팅 상태를 확인합니다. |
 
 ---
 

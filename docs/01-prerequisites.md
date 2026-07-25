@@ -82,30 +82,10 @@ cd ms-appservice-basic-workshop01
 
 ## 트러블슈팅
 
-### (1) 확장 설치 실패
-
-네트워크 오류나 타임아웃으로 설치가 실패한 경우 동일 명령을 재시도합니다.
-
-```bash
-az extension add --name application-insights --upgrade --only-show-errors
-az extension add --name authV2 --upgrade --only-show-errors
-az extension add --name log-analytics --upgrade --only-show-errors
-```
-
-설치가 계속 실패하면 CLI 자체를 업그레이드한 뒤 재시도합니다.
-
-```bash
-az upgrade
-```
-
-### (2) 구독이 여러 개인 경우
-
-`az account show`에서 잘못된 구독이 표시되면 아래 명령으로 전환합니다.
-
-```bash
-az account set --subscription "<구독 ID 또는 이름>"
-az account show -o table
-```
+| 증상 | 원인 | 해결 방법 |
+|------|------|-----------|
+| Azure CLI 확장 설치가 실패함 | 네트워크 오류나 일시적인 타임아웃이 발생했을 수 있습니다. | `az extension add --name application-insights --upgrade --only-show-errors`, `az extension add --name authV2 --upgrade --only-show-errors`, `az extension add --name log-analytics --upgrade --only-show-errors`를 다시 실행합니다.<br>계속 실패하면 `az upgrade`로 CLI를 업그레이드한 뒤 재시도합니다. |
+| `az account show`에 사용할 구독이 아닌 다른 구독이 표시됨 | 로그인한 계정에 여러 Azure 구독이 연결되어 있습니다. | `az account set --subscription "<구독 ID 또는 이름>"`으로 전환한 뒤 `az account show -o table`로 확인합니다. |
 
 ---
 
