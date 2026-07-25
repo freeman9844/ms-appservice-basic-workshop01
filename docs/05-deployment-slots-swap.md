@@ -92,8 +92,17 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 🟢 **실행**
 
 ```bash
-# production과 동일한 앱 구성을 가진 staging 배포 슬롯을 생성합니다.
-az webapp deployment slot create -g $RG -n $APP --slot staging --configuration-source $APP
+# staging 슬롯이 없을 때만 production 구성을 복제하여 생성합니다.
+# 이미 생성된 슬롯이 있으면 재실행 시 오류를 내지 않고 다음 단계에서 그대로 사용합니다.
+STAGING_SLOT_COUNT=$(az webapp deployment slot list -g "$RG" -n "$APP" \
+  --query "length([?name=='staging'])" -o tsv)
+if [ "$STAGING_SLOT_COUNT" = "0" ]; then
+  az webapp deployment slot create -g "$RG" -n "$APP" \
+    --slot staging --configuration-source "$APP" --output none
+  echo "staging 슬롯 생성 완료"
+else
+  echo "기존 staging 슬롯 사용"
+fi
 ```
 
 > 👁️ **개념 — `--configuration-source`**
@@ -207,7 +216,7 @@ v1
 | **배포 슬롯** | 같은 App Service Plan의 컴퓨트를 공유하면서 고유 URL·코드·설정을 갖는 실행 중인 앱 환경 |
 | **슬롯 스왑** | 코드 재배포 없이 production ↔ staging 라우팅을 교환하는 무중단 전환; 롤백은 재스왑 한 번 |
 | **sticky 설정 (슬롯 고정 설정)** | `--slot-settings`로 지정한 앱 설정은 스왑 후에도 해당 슬롯에 남음(예: staging 전용 DB 연결 문자열) |
-| **워밍업** | 스왑 전 대상 슬롯이 HTTP 200 헬스 체크를 통과할 때까지 플랫폼이 대기 — 다운타임 없음 |
+| **워밍업** | 스왑 전 대상 슬롯의 각 인스턴스에 기본 `/` 요청을 보내 응답을 기다림; 기본값은 모든 HTTP 상태 코드를 유효하게 처리 |
 | **즉시 롤백** | 스왑 후 이전 버전이 반대 슬롯에 보존되므로 재스왑 한 번으로 즉각 복원 가능 |
 
 ---
@@ -224,7 +233,7 @@ v1
 
 ### (3) 스왑 지연 — 명령이 완료되지 않음
 
-App Service는 스왑 전 새 슬롯이 **HTTP 200**을 반환할 때까지 워밍업을 기다립니다. 앱 시작 시간이 긴 경우 수 분이 소요될 수 있습니다. Portal의 **배포 슬롯 → 슬롯 교환** 화면에서 진행 상태를 모니터링합니다.
+App Service는 스왑 전 새 슬롯의 각 인스턴스에 기본 `/` 요청을 보내 HTTP 응답을 기다립니다. 기본 설정에서는 모든 상태 코드가 유효하므로 200만을 기다리는 헬스 체크가 아닙니다. 200 응답을 강제하려면 3단계의 `WEBSITE_SWAP_WARMUP_PING_PATH`와 `WEBSITE_SWAP_WARMUP_PING_STATUSES`를 설정합니다. 앱 시작 시간이 긴 경우 수 분이 소요될 수 있으며, Portal의 **배포 슬롯 → 슬롯 교환** 화면에서 진행 상태를 모니터링합니다.
 
 ---
 

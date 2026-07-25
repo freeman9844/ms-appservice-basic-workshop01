@@ -82,7 +82,7 @@ flowchart LR
 
 **09 Automatic Scaling · Prewarmed A/B**는 07의 규칙 기반 Autoscale을 App Service의 HTTP 기반 Automatic Scaling으로 전환하고 Prewarmed를 깊게 관찰하는 실험입니다. `hey`, 두 Python observer, Azure Monitor `InstanceCount`를 사용하며 약 22–38분이 걸립니다. 07 직후 수행하면 상태 전환이 가장 명확합니다.
 
-10–12 세 모듈은 순서 의존성 없이 **어떤 조합으로든** 건너뛰거나 골라 진행할 수 있습니다(단, 10 수행 후 11·12 진행 시 첫 단계에서 Easy Auth 일시 비활성화 필요).
+10–12 세 모듈은 순서 의존성 없이 **어떤 조합으로든** 건너뛰거나 골라 진행할 수 있습니다(단, 10 수행 후 11·12 진행 시 첫 단계에서 Easy Auth를 비활성화하며, 이 상태는 13 정리까지 유지됩니다).
 
 | | 10 인증 (Easy Auth) | 11 사이드카 | 12 Auto-heal & 진단 |
 |---|---|---|---|
@@ -91,7 +91,7 @@ flowchart LR
 | **도구** | az CLI (webapp auth) + 브라우저 | az CLI (sitecontainers) | az resource update + curl |
 | **상태** | GA | GA | GA |
 | **소요 시간** | 10–15분 | 8–12분 | 8–12분 |
-| **유의 사항** | Entra 앱 등록 권한 필요; 이후 11·12 진행 시 첫 단계에서 일시 비활성화 | 모듈 10 수행 시 첫 단계에서 Easy Auth 일시 비활성화 필요 | 모듈 10 수행 시 첫 단계에서 Easy Auth 일시 비활성화 필요; 재활용 관찰 대기 약 90초 |
+| **유의 사항** | Entra 앱 등록 권한 필요; 이후 11·12 진행 시 인증 비활성 상태로 전환 | 모듈 10 수행 시 첫 단계에서 Easy Auth 비활성화(13 정리까지 유지) | 모듈 10 수행 시 첫 단계에서 Easy Auth 비활성화(13 정리까지 유지); 재활용 관찰 대기 약 90초 |
 
 ---
 

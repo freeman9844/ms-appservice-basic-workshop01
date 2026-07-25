@@ -134,8 +134,8 @@ app-appsvcworkshop-<SUFFIX>-staging.azurewebsites.net  staging  20.0
 
 ```bash
 # 라우팅 쿼리 파라미터로 staging 또는 production 슬롯을 강제 선택해 각각의 버전을 확인합니다.
-curl -s "$APP_URL/?x-ms-routing-name=staging" | grep -o 'v[0-9]'   # v2 (staging 강제)
-curl -s "$APP_URL/?x-ms-routing-name=self" | grep -o 'v[0-9]'      # v1 (production 강제)
+curl -s "$APP_URL/?x-ms-routing-name=staging" | grep -m1 -o 'v[0-9]'   # v2 (staging 강제)
+curl -s "$APP_URL/?x-ms-routing-name=self" | grep -m1 -o 'v[0-9]'      # v1 (production 강제)
 ```
 
 📋 **예상 출력**

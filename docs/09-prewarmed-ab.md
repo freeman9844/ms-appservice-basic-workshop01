@@ -18,29 +18,16 @@
 - 종료 전에 Prewarmed 1과 시작 지연 없음으로 복원하고 전체 Automatic Scaling 상태를 확인합니다.
 - 모듈 종료 상태: **Automatic scaling 활성(Always ready 1·Prewarmed 1·Maximum burst 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
 
-## 공통 상태 — 항상 실행
-
-> 🟢 이 줄은 같은 터미널로 이어서 진행하든, 새 Cloud Shell에서 다시 시작하든 먼저 실행합니다.
-> `REPO_DIR`는 `scripts/observe_instances.py`의 경로를 고정하기 위해 여기서 항상 정의합니다.
-
-```bash
-# 관찰 스크립트를 현재 리포지토리의 절대 경로로 실행할 수 있도록 기준 경로를 저장합니다.
-REPO_DIR="$HOME/ms-appservice-basic-workshop01"
-```
-
----
-
 ## 0단계 — (선택) 변수 재설정
 
 > ⏭️ **07 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
 > 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
 > `SUFFIX` 는 **02 모듈에서 사용한 값과 동일하게** 입력하세요.
-> 이후 헬퍼는 기본 클론 경로 `~/ms-appservice-basic-workshop01`를 기준으로 동작합니다. 새 Cloud Shell은 현재 디렉터리를 보장하지 않으므로, 스크립트 경로를 고정해 둡니다.
 
 🟢 **실행**
 
 ```bash
-# 이전 모듈의 리소스 변수를 복원하고 Web App 및 Plan 리소스 ID를 조회합니다.
+# 이전 모듈의 기본 리소스 변수를 복원합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -48,8 +35,21 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
+```
+
+---
+
+## 공통 상태 — 항상 실행
+
+> 🟢 0단계를 건너뛰었더라도 아래 블록은 반드시 실행합니다. 관찰 스크립트 경로와 이 모듈에서 처음 사용하는 Autoscale 이름·리소스 ID를 항상 구성합니다.
+
+🟢 **실행**
+
+```bash
+# 관찰 스크립트 경로와 Automatic Scaling 전환에 필요한 파생 변수를 구성합니다.
+REPO_DIR="$HOME/ms-appservice-basic-workshop01"
 AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
-APP_URL="https://$(az webapp show -g $RG -n $APP --query defaultHostName -o tsv)"
+APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
 PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
 APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv)
 echo "APP_URL=$APP_URL"
@@ -879,7 +879,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 `observe_instances.py`가 2로 종료되거나 JSON 배열이 비어 있으면, 이번 burst에서 새 instance를 끝내지 못한 것입니다. 한 번의 실행만으로 Automatic scaling 실패나 `Prewarmed` 무효를 단정하지 말고 다음을 점검합니다.
 
-- 새 Cloud Shell에서 시작했다면 위 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인한 뒤, 0단계에서 `SUFFIX`와 Azure 리소스 변수만 다시 맞춥니다.
+- 새 Cloud Shell에서 시작했다면 먼저 0단계에서 `SUFFIX`와 Azure 리소스 변수를 다시 맞춘 뒤, 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인합니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
 - 5단계의 복원 명령을 실행한 뒤, 4단계의 단일 인스턴스 게이트에서 새 1분 메트릭 두 개가 연속으로 `1`인지 다시 확인하고 2단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.

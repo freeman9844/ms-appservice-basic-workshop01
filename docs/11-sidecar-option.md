@@ -72,17 +72,17 @@ APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 
 ---
 
-## 1단계 — Easy Auth 일시 비활성화(모듈 10 수행자만)
+## 1단계 — Easy Auth 비활성화(모듈 10 수행자만)
 
 > ⏭️ **모듈 10(선택)를 건너뛰었다면 이 단계도 건너뛰고 2단계로 이동하세요.**
 
-모듈 10에서 Easy Auth를 활성화한 경우, curl로 `/cache` 엔드포인트를 테스트하려면 인증 게이트를 일시적으로 해제해야 합니다.
+모듈 10에서 Easy Auth를 활성화한 경우, curl로 `/cache` 엔드포인트를 테스트하려면 인증 게이트를 해제해야 합니다. 비활성 상태는 이후 선택 모듈과 13 정리까지 유지됩니다.
 
 🟢 **실행**
 
 ```bash
-# curl 검증을 위해 Easy Auth 일시 비활성화
-# 이 선택 모듈은 인증 게이트를 잠시 내린 상태로 /cache를 반복 호출해 Redis 동작을 볼 수 있게 하며,
+# curl 검증을 위해 Easy Auth 비활성화
+# 이 선택 모듈은 인증 게이트를 내린 상태로 /cache를 반복 호출해 Redis 동작을 볼 수 있게 하며,
 # 이후 모듈 12도 같은 검증 편의를 위해 비활성 상태를 그대로 전제로 시작합니다.
 az webapp auth update -g $RG -n $APP --enabled false
 ```

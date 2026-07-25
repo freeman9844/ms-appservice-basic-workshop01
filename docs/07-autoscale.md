@@ -25,7 +25,7 @@
 🟢 **실행**
 
 ```bash
-# 이전 모듈의 리소스 변수와 Autoscale 설정 이름을 복원합니다.
+# 이전 모듈의 기본 리소스 변수를 복원합니다.
 SUFFIX=<이전에_메모한_값>
 LOC=koreacentral
 RG=rg-appsvcworkshop-$SUFFIX
@@ -33,6 +33,18 @@ PLAN=plan-appsvcworkshop-$SUFFIX
 APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
+```
+
+---
+
+## 공통 상태 — 항상 실행
+
+> 🟢 0단계를 건너뛰었더라도 아래 블록은 반드시 실행합니다. Autoscale 이름과 Plan 리소스 ID는 앞선 모듈에서 만들지 않으므로 이 모듈에서 항상 구성합니다.
+
+🟢 **실행**
+
+```bash
+# 기본 리소스 변수로 Autoscale 이름, 앱 URL과 Plan 리소스 ID를 구성합니다.
 AUTOSCALE=autoscale-appsvcworkshop-$SUFFIX
 APP_URL="https://$(az webapp show -g "$RG" -n "$APP" --query defaultHostName -o tsv)"
 PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv)
