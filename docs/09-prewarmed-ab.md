@@ -15,7 +15,7 @@
 - `/api/info`의 `started_at`과 새 instance의 최초 관찰 시각으로 `first_response_age`를 계산합니다.
 - `Prewarmed=0`과 `Prewarmed=1`의 인스턴스별 시작·투입 타임라인을 비교하되, 한 번의 실행에서 어느 쪽이 반드시 더 빠르다고 판정하지 않습니다.
 - `InstanceCount` 메트릭으로 시험 전·시험 사이의 단일 인스턴스 기준 상태를 확인합니다.
-- 종료 전에 Prewarmed 1과 시작 지연 없음으로 복원하고 전체 Automatic Scaling 상태를 확인합니다.
+- 종료 전에 실험용 시작 지연을 삭제하고 Prewarmed 1을 포함한 전체 Automatic Scaling 상태를 확인합니다.
 - 모듈 종료 상태: **Automatic scaling 활성(Always ready 1·Prewarmed 1·Maximum burst 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
 
 ## 0단계 — (선택) 변수 재설정
@@ -223,7 +223,7 @@ az webapp config appsettings set -g "$RG" -n "$APP" \
 echo "STARTUP_DELAY_SECONDS=20 설정 완료"
 ```
 
-> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 5단계의 **모듈 기본 상태로 복원** 명령을 실행합니다.
+> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 트러블슈팅 (4)의 **실패 후 기본 상태 복구** 명령을 실행합니다.
 
 🟢 **실행 — 앱 준비 상태 확인**
 
@@ -247,9 +247,9 @@ for attempt in $(seq 1 18); do
     sleep 5
   fi
 done
-# 끝까지 정상 응답이 없으면 이후 Trial을 막고 복원 후 중단하도록 명시적으로 실패시킵니다.
+# 끝까지 정상 응답이 없으면 이후 Trial을 막고 복구 안내와 함께 명시적으로 실패시킵니다.
 if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
-  echo "/health 확인 실패: 5단계의 복원 명령을 실행하세요." >&2
+  echo "/health 확인 실패: 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
   false
 fi
 ```
@@ -396,16 +396,16 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   # observer·hey·metric 세 프로세스가 모두 0이어야 같은 Trial A 창의 응답/부하/메트릭 결과가 모두 유효합니다.
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 A 실패: 세 결과를 비교하지 말고 5단계의 복원 명령을 실행하세요." >&2
+    echo "시험 A 실패: 세 결과를 비교하지 말고 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 A 기준 instance 확인 실패: 5단계의 모듈 기본 상태로 복원 명령을 실행한 뒤 2단계부터 다시 시도하세요." >&2
+  echo "시험 A 기준 instance 확인 실패: 트러블슈팅 (4)의 복구 명령을 실행한 뒤 2단계부터 다시 시도하세요." >&2
   false
 fi
 ```
 
-> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 5단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 2단계부터 다시 시도합니다.
+> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 트러블슈팅 (4)의 **실패 후 기본 상태 복구** 명령을 실행한 뒤 2단계부터 다시 시도합니다.
 
 📋 **예상 출력** (리허설 예시)
 
@@ -517,7 +517,7 @@ az webapp show -g "$RG" -n "$APP" \
 > 3. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 부하 조건은 동일하게 유지하고 출력 파일만 `$AB_DIR/hey-burst-1.out`을 사용합니다.
 > 4. `METRIC_PID=$!`와 `HEY_PID=$!`에 Trial B의 백그라운드 프로세스 PID를 저장하여 뒤의 `wait`가 각 완료와 종료 상태를 정확히 확인하도록 합니다.
 > 5. `observe_instances.py`는 기준 instance를 제외하고 `--concurrency 30`, `--request-timeout 5` 조건으로 새 instance를 관찰합니다. 결과는 Trial B 전용 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
-> 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 5단계 복원 명령을 실행합니다.
+> 6. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 트러블슈팅 (4)의 복구 명령을 실행합니다.
 
 ```bash
 # 시험 B에 시험 A와 동일한 부하와 관찰 조건을 적용합니다.
@@ -565,11 +565,11 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   # 세 exit code가 모두 0이어야 Trial B의 observer·hey·metric 결과를 서로 비교할 수 있습니다.
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 B 실패: 세 결과를 비교하지 말고 5단계의 복원 명령을 실행하세요." >&2
+    echo "시험 B 실패: 세 결과를 비교하지 말고 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 B 기준 instance 확인 실패: 5단계의 복원 명령을 실행한 뒤 결과를 해석하지 말고 2단계부터 다시 시도하세요." >&2
+  echo "시험 B 기준 instance 확인 실패: 트러블슈팅 (4)의 복구 명령을 실행한 뒤 결과를 해석하지 말고 2단계부터 다시 시도하세요." >&2
   false
 fi
 ```
@@ -599,58 +599,32 @@ observer exit=0, hey exit=0, metric exit=0
 
 ---
 
-## 5단계 — 기본 상태 복원 및 결과 해석
+## 5단계 — 실험 설정 정리 및 결과 해석
 
 먼저 확인할 것은 **Automatic Scaling의 scale-out 자체가 두 시험 모두에서 동작했다는 사실**입니다. 각 시험에서 burst 부하에 따라 `InstanceCount`가 1에서 Maximum burst 5까지 증가했고, 기준 instance 외 새 instance 4개가 실제 응답에 투입됐습니다. 이 scale-out 성공을 전제로, 이제 총 scale-out 시간의 승패 대신 **instance별 시작·최초 응답 타임라인**을 나란히 봅니다.
 
-🟢 **실행 — 모듈 기본 상태로 복원**
+🟢 **실행 — 실험용 시작 지연 삭제**
 
-> ⚠️ 결과 해석보다 먼저 복원합니다. 이후 명령이 실패하더라도 다음 모듈이 동일한 상태에서 시작할 수 있도록 Prewarmed를 1로 되돌리고 인위적인 시작 지연을 삭제합니다.
+> ⚠️ Trial B가 정상 완료되면 Prewarmed는 이미 1입니다. 결과 해석보다 먼저 실험을 위해 추가한 인위적인 시작 지연만 삭제하여 다음 모듈에 영향을 주지 않게 합니다.
 
 ```bash
-# 리소스 ID를 다시 조회하여 새 Cloud Shell에서도 복원할 수 있게 합니다.
-# RESTORE_STATUS는 Prewarmed 복원과 앱 설정 정리를 각각 시도한 뒤 누적 성공/실패를 한 번에 판단하기 위한 상태값입니다.
-RESTORE_STATUS=0
-if APP_ID=$(az webapp show -g "$RG" -n "$APP" --query id -o tsv); then
-  # Web App config에서 Always-ready 1, Prewarmed 1을 다시 써서 다음 모듈의 기준 warm 상태를 먼저 복원합니다.
-  if ! az rest --method patch \
-    --uri "${APP_ID}/config/web?api-version=2024-11-01" \
-    --body '{"properties":{"minimumElasticInstanceCount":1,"preWarmedInstanceCount":1}}' \
-    --output none
-  then
-    echo "Prewarmed 복원 실패" >&2
-    RESTORE_STATUS=1
-  fi
-else
-  echo "Web App 리소스 ID 조회 실패" >&2
-  RESTORE_STATUS=1
-fi
-
-# Prewarmed PATCH 결과와 관계없이 인위적인 시작 지연 삭제를 시도합니다.
-# startup delay 정리는 위 PATCH 성공 여부와 독립적으로 실행해, 한쪽이 실패해도 다른 복구 기회를 잃지 않게 합니다.
-if ! az webapp config appsettings delete -g "$RG" -n "$APP" \
+# Trial B가 이미 만든 Prewarmed=1 상태는 유지하고, 실험 전용 시작 지연만 제거합니다.
+if az webapp config appsettings delete -g "$RG" -n "$APP" \
   --setting-names STARTUP_DELAY_SECONDS --output none
 then
-  echo "STARTUP_DELAY_SECONDS 삭제 실패" >&2
-  RESTORE_STATUS=1
-fi
-
-if [ "$RESTORE_STATUS" -ne 0 ]; then
-  echo "복원 실패: 트러블슈팅의 복구 명령을 실행하세요." >&2
+  echo "STARTUP_DELAY_SECONDS 삭제 완료"
 else
-  echo "Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료"
+  echo "STARTUP_DELAY_SECONDS 삭제 실패: 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
+  false
 fi
-
-# 이 검사가 블록의 최종 종료 코드가 되어 실패를 다음 명령으로 넘기지 않습니다.
-[ "$RESTORE_STATUS" -eq 0 ]
 ```
 
-🟢 **실행 — 복원 상태 확인**
+🟢 **실행 — 정리 후 상태 확인**
 
 ```bash
-# Automatic Scaling 전체 설정과 시작 지연 삭제를 단언합니다.
+# Automatic Scaling 전체 설정과 실험용 시작 지연 삭제를 단언합니다.
 VERIFY_STATUS=0
-# 복원 검증은 현재 리소스 상태를 다시 읽어야 하므로 Plan ID와 Web App ID를 둘 다 fresh 조회합니다.
+# 정리 후 검증은 현재 리소스 상태를 다시 읽어야 하므로 Plan ID와 Web App ID를 둘 다 fresh 조회합니다.
 if ! PLAN_ID=$(az appservice plan show -g "$RG" -n "$PLAN" --query id -o tsv); then
   echo "Plan 리소스 ID 조회 실패" >&2
   VERIFY_STATUS=1
@@ -696,7 +670,7 @@ if [ "$VERIFY_STATUS" -eq 0 ]; then
   echo "STARTUP_DELAY_SECONDS count=$STARTUP_DELAY_COUNT"
   echo "Autoscale setting count=$AUTOSCALE_COUNT"
 
-  # 최종 5/1/1과 startup delay 0개, Plan 대상 Autoscale 0개를 모두 만족해야만 복원이 끝난 것으로 인정합니다.
+  # 최종 5/1/1과 startup delay 0개, Plan 대상 Autoscale 0개를 모두 만족해야만 실험 정리가 끝난 것으로 인정합니다.
   if ! jq -e '.automaticScaling == true and .maximumBurst == 5' \
     >/dev/null <<< "$PLAN_SCALE" ||
     ! jq -e '.alwaysReady == 1 and .prewarmed == 1' \
@@ -709,17 +683,17 @@ if [ "$VERIFY_STATUS" -eq 0 ]; then
 fi
 
 if [ "$VERIFY_STATUS" -ne 0 ]; then
-  echo "복원 상태 불일치: 트러블슈팅의 복구 명령을 실행하세요." >&2
+  echo "정리 후 상태 불일치: 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
 fi
 
 if [ "$VERIFY_STATUS" -eq 0 ]; then
-  # 설정값이 맞더라도 재시작 직후일 수 있으므로 마지막으로 /health readiness를 polling해 실제 앱 응답까지 확인합니다.
+  # 설정값이 맞더라도 시작 지연 삭제로 재시작 중일 수 있으므로 마지막으로 /health readiness를 polling해 실제 앱 응답까지 확인합니다.
   for attempt in $(seq 1 18); do
     if curl -fsS --max-time 10 "$APP_URL/health" | jq -e '.status == "ok"'; then
       break
     fi
     if [ "$attempt" -eq 18 ]; then
-      echo "복원 후 /health 확인 실패" >&2
+      echo "정리 후 /health 확인 실패" >&2
       VERIFY_STATUS=1
       break
     fi
@@ -734,7 +708,7 @@ fi
 📋 **예상 출력**
 
 ```text
-Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료
+STARTUP_DELAY_SECONDS 삭제 완료
 {
   "automaticScaling": true,
   "maximumBurst": 5
@@ -881,7 +855,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 - 새 Cloud Shell에서 시작했다면 먼저 0단계에서 `SUFFIX`와 Azure 리소스 변수를 다시 맞춘 뒤, 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인합니다.
 - `STARTUP_DELAY_SECONDS=20` 적용 후 `/health`가 정상 응답했는지 확인합니다.
-- 5단계의 복원 명령을 실행한 뒤, 4단계의 단일 인스턴스 게이트에서 새 1분 메트릭 두 개가 연속으로 `1`인지 다시 확인하고 2단계부터 재실행합니다.
+- 트러블슈팅 (4)의 복구 명령을 실행한 뒤, 4단계의 단일 인스턴스 게이트에서 새 1분 메트릭 두 개가 연속으로 `1`인지 다시 확인하고 2단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
 - Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
@@ -900,7 +874,7 @@ az monitor metrics list \
 
 ### (2) 단일 인스턴스로 축소되지 않음
 
-시험 A 뒤 4단계의 단일 인스턴스 게이트가 약 15분 안에 통과하지 못하면 시험 B를 실행하지 말고, 5단계의 복원 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
+시험 A 뒤 4단계의 단일 인스턴스 게이트가 약 15분 안에 통과하지 못하면 시험 B를 실행하지 말고, 트러블슈팅 (4)의 복구 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
 
 ```bash
 # 1분 Average가 늦게 내려갈 수 있으므로, 같은 최근 10분 진단 조회를 1분 간격으로 5번 반복해 scale-in 진행 여부를 추적합니다.
@@ -923,9 +897,9 @@ Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Pla
 
 이는 오류가 아닙니다. 이번 실행에서는 준비된 instance가 곧바로 활성화되어 응답 전 대기 구간이 짧았을 수 있습니다. 단일 실행의 총 scale-out 시간만으로 Prewarmed 효과를 단정하지 말고, 인스턴스별 `started_at`과 `first_seen_at`을 관찰 결과로 기록합니다.
 
-### (4) 복원 명령이 실패함
+### (4) 실패 후 기본 상태 복구
 
-5단계의 복원 블록이 실패하면 다음 모듈로 넘어가지 말고, 아래 복구 명령을 다시 실행합니다.
+Trial A 또는 B가 중간에 실패했거나 5단계의 실험 설정 정리가 완료되지 않았다면 다음 모듈로 넘어가지 말고 아래 복구 명령을 실행합니다. 이 명령은 현재 상태와 관계없이 Prewarmed를 1로 맞추고 실험용 시작 지연을 삭제합니다.
 
 ```bash
 # 새 Cloud Shell에서도 복구할 수 있도록 변수와 리소스 ID를 다시 조회합니다.
@@ -961,7 +935,7 @@ az rest --method patch \
 az webapp config appsettings delete -g "$RG" -n "$APP" \
   --setting-names STARTUP_DELAY_SECONDS --output none
 
-# 복구 후 5단계의 "복원 상태 확인" 블록을 다시 실행합니다.
+# 복구 후 5단계의 "정리 후 상태 확인" 블록을 다시 실행합니다.
 ```
 
 ### (5) hey 설치 실패
