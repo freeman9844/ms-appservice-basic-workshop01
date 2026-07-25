@@ -407,7 +407,7 @@ fi
 
 > ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 5단계의 **모듈 기본 상태로 복원** 명령을 실행한 뒤 2단계부터 다시 시도합니다.
 
-📋 **예상 출력** (2026-07-23 리허설 예시)
+📋 **예상 출력** (리허설 예시)
 
 ```text
 metric_timestamp	observed_at	instance_count
@@ -576,7 +576,7 @@ fi
 
 > ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 결과를 해석합니다.
 
-📋 **예상 출력** (2026-07-23 리허설 예시)
+📋 **예상 출력** (리허설 예시)
 
 ```text
 metric_timestamp	observed_at	instance_count
@@ -803,7 +803,7 @@ jq -r '
 echo "[09] first_response_age는 관찰값이며 단일 실행의 속도 승자를 의미하지 않습니다."
 ```
 
-📋 **예상 출력** (2026-07-23 리허설 예시)
+📋 **예상 출력** (리허설 예시)
 
 ```text
 trial	instance	started_at	first_seen_at	first_response_age
@@ -841,7 +841,7 @@ jq -s -r '
 ' "$NO_PREWARM_OBSERVATIONS" "$PREWARM_OBSERVATIONS"
 ```
 
-📋 **예상 출력** (2026-07-23 리허설 예시)
+📋 **예상 출력** (리허설 예시)
 
 ```text
 trial	samples	min_age	max_age	range
