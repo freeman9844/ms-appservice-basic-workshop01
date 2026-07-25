@@ -148,23 +148,55 @@ flowchart LR
 
 ## 트러블슈팅 색인
 
-> 각 모듈 문서 끝의 **트러블슈팅** 섹션으로 바로 이동하려면 아래 표의 링크를 사용하세요.
+자주 발생하는 문제를 빠르게 찾을 수 있도록 각 모듈의 대표 증상을 아래에 정리합니다.
 
-| 증상 | 참조 모듈 |
-|------|-----------|
-| Cloud Shell 구독 선택·az 확장 오류 | [01 사전 준비](docs/01-prerequisites.md#트러블슈팅) |
-| 리소스 그룹·Plan·Web App 생성 오류 | [02 환경 준비](docs/02-environment-setup.md#트러블슈팅) |
-| 배포 후 앱이 응답하지 않음 | [03 코드 배포 & 외부 접속](docs/03-deploy-code.md#트러블슈팅) |
-| 앱 설정 변경 후 동작이 바뀌지 않음 | [04 앱 설정·환경변수](docs/04-app-settings.md#트러블슈팅) |
-| sed 치환·스왑 문제 | [05 배포 슬롯 & 스왑](docs/05-deployment-slots-swap.md#트러블슈팅) |
-| 트래픽 분할 비율이 안 보임 | [06 슬롯 트래픽 분할 카나리](docs/06-traffic-split-canary.md#트러블슈팅) |
-| Autoscale CPU 규칙으로 확장되지 않음 | [07 Autoscale](docs/07-autoscale.md#트러블슈팅) |
-| Automatic Scaling 전환·Prewarmed A/B 복원이 실패함 | [09 Automatic Scaling · Prewarmed A/B](docs/09-prewarmed-ab.md#트러블슈팅) |
-| KQL 쿼리 결과 없음 | [08 관찰 가능성](docs/08-observability.md#트러블슈팅) |
-| 로그인 리디렉션이 안 됨 | [10 (선택) 인증 (Easy Auth)](docs/10-easy-auth.md#트러블슈팅) |
-| `/cache`가 계속 unavailable | [11 (선택) 사이드카 컨테이너](docs/11-sidecar-option.md#트러블슈팅) |
-| Auto-heal 재활용이 안 일어남 | [12 (선택) Auto-heal & 진단](docs/12-autoheal-option.md#트러블슈팅) |
-| 리소스 삭제 후 과금 지속 | [13 정리](docs/13-cleanup.md#트러블슈팅) |
+| 증상 | 모듈 |
+|------|------|
+| Azure CLI 확장 설치가 실패함 | [Module 01](docs/01-prerequisites.md#트러블슈팅) |
+| `az account show`에 사용할 구독이 아닌 다른 구독이 표시됨 | [Module 01](docs/01-prerequisites.md#트러블슈팅) |
+| `The app name 'app-appsvcworkshop-XXXXX' is not available` 오류가 발생함 | [Module 02](docs/02-environment-setup.md#트러블슈팅) |
+| Korea Central에서 P0v4 SKU를 만들 수 없음 | [Module 02](docs/02-environment-setup.md#트러블슈팅) |
+| `az monitor app-insights` 명령을 찾을 수 없음 | [Module 02](docs/02-environment-setup.md#트러블슈팅) |
+| `--track-status` 출력에 `Failed` 또는 빌드 오류가 표시됨 | [Module 03](docs/03-deploy-code.md#트러블슈팅) |
+| 배포 직후 첫 요청에서 502 게이트웨이 오류가 발생함 | [Module 03](docs/03-deploy-code.md#트러블슈팅) |
+| 배포 zip에 `tests/`가 포함됨 | [Module 03](docs/03-deploy-code.md#트러블슈팅) |
+| 앱 설정을 변경했지만 새 메시지가 표시되지 않음 | [Module 04](docs/04-app-settings.md#트러블슈팅) |
+| 한글·공백·특수문자가 포함된 설정값에서 구문 오류가 발생함 | [Module 04](docs/04-app-settings.md#트러블슈팅) |
+| `jq` 명령을 찾을 수 없음 | [Module 04](docs/04-app-settings.md#트러블슈팅) |
+| `sed` 실행 후에도 `grep '^VERSION' app.py`가 `VERSION = "v1"`을 표시함 | [Module 05](docs/05-deployment-slots-swap.md#트러블슈팅) |
+| 스테이징 슬롯의 `curl` 응답이 느리거나 502 오류가 발생함 | [Module 05](docs/05-deployment-slots-swap.md#트러블슈팅) |
+| 슬롯 스왑 명령이 오랫동안 완료되지 않음 | [Module 05](docs/05-deployment-slots-swap.md#트러블슈팅) |
+| 트래픽 분포가 0/100으로 나타나 v1 또는 v2 요청이 전혀 없음 | [Module 06](docs/06-traffic-split-canary.md#트러블슈팅) |
+| 브라우저에서 요청해도 버전 비율이 바뀌지 않음 | [Module 06](docs/06-traffic-split-canary.md#트러블슈팅) |
+| 스왑 후에도 일부 트래픽이 구 버전으로 라우팅됨 | [Module 06](docs/06-traffic-split-canary.md#트러블슈팅) |
+| 부하를 생성해도 scale-out이 관찰되지 않음 | [Module 07](docs/07-autoscale.md#트러블슈팅) |
+| Autoscale rule 생성이 실패함 | [Module 07](docs/07-autoscale.md#트러블슈팅) |
+| `hey` 설치가 실패하거나 명령을 찾을 수 없음 | [Module 07](docs/07-autoscale.md#트러블슈팅) |
+| KQL 쿼리 결과가 0건임 | [Module 08](docs/08-observability.md#트러블슈팅) |
+| `AppRequests` 테이블이 0건임 | [Module 08](docs/08-observability.md#트러블슈팅) |
+| `az monitor log-analytics query` 명령을 찾을 수 없음 | [Module 08](docs/08-observability.md#트러블슈팅) |
+| Cloud Shell에서 credential problem 또는 MSI token audience 오류가 발생함 | [Module 08](docs/08-observability.md#트러블슈팅) |
+| `az monitor app-insights component show` 명령을 찾을 수 없음 | [Module 08](docs/08-observability.md#트러블슈팅) |
+| `observe_instances.py`가 2로 종료되거나 `observations` 배열이 비어 있음 | [Module 09](docs/09-prewarmed-ab.md#트러블슈팅) |
+| 시험 A 후 약 15분이 지나도 단일 인스턴스로 축소되지 않음 | [Module 09](docs/09-prewarmed-ab.md#트러블슈팅) |
+| `load_to_first_response_seconds`가 두 시험에서 비슷함 | [Module 09](docs/09-prewarmed-ab.md#트러블슈팅) |
+| Trial A/B 실패 후 실험 이전의 기본 상태로 돌아가야 함 | [Module 09](docs/09-prewarmed-ab.md#트러블슈팅) |
+| `hey` 설치가 실패하거나 명령을 찾을 수 없음 | [Module 09](docs/09-prewarmed-ab.md#트러블슈팅) |
+| P0v4에서 Premium V2/V3 SKU만 지원한다는 CLI 오류가 발생함 | [Module 09](docs/09-prewarmed-ab.md#트러블슈팅) |
+| 브라우저 접속 시 로그인 리디렉션 없이 앱이 바로 표시됨 | [Module 10](docs/10-easy-auth.md#트러블슈팅) |
+| AADSTS 리디렉션 URI 불일치 오류가 발생함 | [Module 10](docs/10-easy-auth.md#트러블슈팅) |
+| Entra 앱 등록 생성이 권한 부족으로 실패함 | [Module 10](docs/10-easy-auth.md#트러블슈팅) |
+| `az webapp auth microsoft update` 명령을 찾을 수 없음 | [Module 10](docs/10-easy-auth.md#트러블슈팅) |
+| 사이드카 부착 후 `/cache`가 계속 `unavailable`을 반환함 | [Module 11](docs/11-sidecar-option.md#트러블슈팅) |
+| Redis 이미지 pull 실패 또는 컨테이너 기동 오류가 발생함 | [Module 11](docs/11-sidecar-option.md#트러블슈팅) |
+| `az webapp sitecontainers` 명령을 찾을 수 없음 | [Module 11](docs/11-sidecar-option.md#트러블슈팅) |
+| Auto-heal 후에도 `started_at`이 바뀌지 않음 | [Module 12](docs/12-autoheal-option.md#트러블슈팅) |
+| `/api/info` 또는 `/slow`가 403을 반환함 | [Module 12](docs/12-autoheal-option.md#트러블슈팅) |
+| `az resource update` 오류가 발생하거나 Auto-heal 규칙이 적용되지 않음 | [Module 12](docs/12-autoheal-option.md#트러블슈팅) |
+| `jq: error`가 발생하거나 응답에 `started_at`이 없음 | [Module 12](docs/12-autoheal-option.md#트러블슈팅) |
+| `az group exists`가 계속 `true`를 반환함 | [Module 13](docs/13-cleanup.md#트러블슈팅) |
+| Entra 앱 등록 삭제가 권한 오류로 실패함 | [Module 13](docs/13-cleanup.md#트러블슈팅) |
+| 정리할 리소스의 `SUFFIX`를 잊어버림 | [Module 13](docs/13-cleanup.md#트러블슈팅) |
 
 ---
 
