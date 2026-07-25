@@ -115,7 +115,7 @@ if [ "$(az monitor autoscale list -g "$RG" --query "length([?name=='$AUTOSCALE']
   echo "Plan의 Autoscale 설정 제거 실패" >&2
   false
 else
-  # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (6) 참고).
+  # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (7) 참고).
   # Plan 리소스 수준에서 Automatic Scaling을 켜고, burst 시 최대로 늘릴 worker 수를 5로 고정합니다.
   az rest --method patch \
     --uri "${PLAN_ID}?api-version=2024-11-01" \
@@ -224,7 +224,7 @@ az webapp config appsettings set -g "$RG" -n "$APP" \
 echo "STARTUP_DELAY_SECONDS=60 설정 완료"
 ```
 
-> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 트러블슈팅 (4)의 **실패 후 기본 상태 복구** 명령을 실행합니다.
+> ⚠️ 오류가 출력되거나 완료 메시지가 보이지 않으면 다음 단계로 진행하지 마세요. 설정을 변경한 뒤 중단해야 한다면 트러블슈팅 (5)의 **실패 후 기본 상태 복구** 명령을 실행합니다.
 
 🟢 **실행 — 앱 준비 상태 확인**
 
@@ -250,7 +250,7 @@ for attempt in $(seq 1 18); do
 done
 # 끝까지 정상 응답이 없으면 이후 Trial을 막고 복구 안내와 함께 명시적으로 실패시킵니다.
 if [ "$HEALTH_CHECK_STATUS" -ne 0 ]; then
-  echo "/health 확인 실패: 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
+  echo "/health 확인 실패: 트러블슈팅 (5)의 복구 명령을 실행하세요." >&2
   false
 fi
 ```
@@ -403,16 +403,16 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   # observer·hey·metric 세 프로세스가 모두 0이어야 같은 Trial A 창의 응답/부하/메트릭 결과가 모두 유효합니다.
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 A 실패: 세 결과를 비교하지 말고 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
+    echo "시험 A 실패: 세 결과를 비교하지 말고 트러블슈팅 (5)의 복구 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 A 기준 instance 확인 실패: 트러블슈팅 (4)의 복구 명령을 실행한 뒤 2단계부터 다시 시도하세요." >&2
+  echo "시험 A 기준 instance 확인 실패: 트러블슈팅 (5)의 복구 명령을 실행한 뒤 2단계부터 다시 시도하세요." >&2
   false
 fi
 ```
 
-> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 트러블슈팅 (4)의 **실패 후 기본 상태 복구** 명령을 실행한 뒤 2단계부터 다시 시도합니다.
+> ⚠️ `observer exit=0, hey exit=0, metric exit=0`일 때만 시험 B로 진행합니다. observer가 2로 종료되거나 metric observer가 1 또는 2로 종료되면 트러블슈팅 (5)의 **실패 후 기본 상태 복구** 명령을 실행한 뒤 2단계부터 다시 시도합니다.
 
 📋 **예상 출력 형식** (시각과 값은 실행마다 달라집니다)
 
@@ -524,7 +524,7 @@ az webapp show -g "$RG" -n "$APP" \
 > 4. `hey -z 180s -c 100 -q 10`으로 시험 A와 동일한 180초 부하를 백그라운드 실행합니다. 출력 파일은 `$AB_DIR/hey-burst-4.out`을 사용합니다.
 > 5. `METRIC_PID=$!`와 `HEY_PID=$!`에 Trial B의 백그라운드 프로세스 PID를 저장하여 뒤의 `wait`가 각 완료와 종료 상태를 정확히 확인하도록 합니다.
 > 6. `observe_instances.py`는 같은 `PREWARM_LOAD_STARTED_AT`을 받아 새 instance의 부하 기준 최초 응답 지연을 `$PREWARM_OBSERVATIONS` JSON에 저장합니다.
-> 7. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 트러블슈팅 (4)의 복구 명령을 실행합니다.
+> 7. observer, `hey`, metric observer의 세 exit code가 모두 0인지 확인합니다. 하나라도 0이 아니면 세 결과를 비교하지 않고 트러블슈팅 (5)의 복구 명령을 실행합니다.
 
 ```bash
 # 시험 B에 시험 A와 동일한 부하와 관찰 조건을 적용합니다.
@@ -577,11 +577,11 @@ if BASELINE_INSTANCE=$(curl -fsS --max-time 10 "$APP_URL/api/info" |
   # 세 exit code가 모두 0이어야 Trial B의 observer·hey·metric 결과를 서로 비교할 수 있습니다.
   echo "observer exit=$OBSERVER_STATUS, hey exit=$HEY_STATUS, metric exit=$METRIC_STATUS"
   if [ "$OBSERVER_STATUS" -ne 0 ] || [ "$HEY_STATUS" -ne 0 ] || [ "$METRIC_STATUS" -ne 0 ]; then
-    echo "시험 B 실패: 세 결과를 비교하지 말고 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
+    echo "시험 B 실패: 세 결과를 비교하지 말고 트러블슈팅 (5)의 복구 명령을 실행하세요." >&2
     false
   fi
 else
-  echo "시험 B 기준 instance 확인 실패: 트러블슈팅 (4)의 복구 명령을 실행한 뒤 결과를 해석하지 말고 2단계부터 다시 시도하세요." >&2
+  echo "시험 B 기준 instance 확인 실패: 트러블슈팅 (5)의 복구 명령을 실행한 뒤 결과를 해석하지 말고 2단계부터 다시 시도하세요." >&2
   false
 fi
 ```
@@ -592,16 +592,23 @@ fi
 
 ```text
 metric_timestamp	observed_at	instance_count
-Prewarmed=4 load_started_at: 2026-07-25T07:15:00Z
 instance	load_started_at	first_seen_at	load_to_first_response_seconds	started_at	first_response_age
-2026-07-25T07:14:00Z	2026-07-25T07:15:12Z	1
-69e069d8	2026-07-25T07:15:00Z	2026-07-25T07:16:02Z	62	2026-07-25T07:15:01Z	61
-9b19c4d6	2026-07-25T07:15:00Z	2026-07-25T07:16:03Z	63	2026-07-25T07:15:02Z	61
-2026-07-25T07:16:00Z	2026-07-25T07:16:40Z	5
-observer exit=0, hey exit=0, metric exit=0
+2026-07-25T08:10:00Z	2026-07-25T08:10:37Z	1
+69e069d8	2026-07-25T08:10:35Z	2026-07-25T08:11:29Z	54	2026-07-25T08:10:50Z	39
+8e0e812d	2026-07-25T08:10:35Z	2026-07-25T08:11:29Z	54	2026-07-25T08:10:53Z	36
+5d90b391	2026-07-25T08:10:35Z	2026-07-25T08:11:29Z	54	2026-07-25T08:10:50Z	39
+3122a953	2026-07-25T08:10:35Z	2026-07-25T08:11:36Z	61	2026-07-25T08:10:59Z	37
+2026-07-25T08:11:00Z	2026-07-25T08:11:41Z	1
+2026-07-25T08:13:00Z	2026-07-25T08:13:15Z	5
+[2]+  Done                    hey -z 180s -c 100 -q 10 "$APP_URL/api/info" > "$AB_DIR/hey-burst-4.out"
+2026-07-25T08:14:00Z	2026-07-25T08:14:19Z	5
 ```
 
-> 👁️ 세 exit code가 모두 0이므로 유효한 시험 B 결과입니다. 기준 instance를 제외한 새 instance 4개가 기록되고 `InstanceCount`가 최종 5까지 증가하면 scale-out 관찰이 성립합니다. 중간 count는 `PT1M` Average와 수집 시점에 따라 생략되거나 1과 5 사이 값으로 나타날 수 있습니다. metric과 instance 행의 출력 순서, 셸의 job-control 줄도 실행마다 달라집니다.
+> 👁️ 이 출력에서는 기준 instance를 제외한 새 instance 4개가 기록됐고 `InstanceCount`도 최종 5까지 증가했으므로 scale-out 관찰은 성립합니다. 신규 4개 중 3개가 부하 시작 54초 뒤 같은 시각에 처음 응답했고, 마지막 instance도 61초에 응답했습니다. `InstanceCount`가 08:11에 아직 1로 보이다가 08:13에 5로 나타나는 것은 `PT1M` Average와 Azure Monitor 게시 지연 때문이며 오류가 아닙니다.
+>
+> ⚠️ 위 발췌는 metric observer가 끝나기 전까지의 출력입니다. 이어서 metric observer의 `Done` 줄과 `observer exit=0, hey exit=0, metric exit=0`이 나오는지 확인한 뒤에만 유효한 시험 B 결과로 해석합니다.
+>
+> ⚠️ 이 실행의 `first_response_age`는 36–39초입니다. 이는 설정값은 60초지만 Azure에 이전 버전 앱의 30초 상한이 배포된 상태와 일치합니다. 이 경우 A/B 비교 자체는 동일한 30초 조건에서 수행됐으므로 참고할 수 있지만, 의도한 60초 실험은 아닙니다. 60초 조건으로 다시 실행하려면 최신 저장소의 `app/app.py`를 프로덕션 앱에 재배포한 뒤 2단계부터 반복합니다.
 >
 > 👁️ 두 시험 모두 같은 앱·같은 엔드포인트·같은 burst 부하를 쓰므로, 비교 대상은 `Prewarmed` 설정 차이와 부하 시작 뒤 관찰된 새 instance 응답 타임라인입니다.
 
@@ -633,7 +640,7 @@ then
   RESTORE_STATUS=1
 fi
 if [ "$RESTORE_STATUS" -ne 0 ]; then
-  echo "실험 설정 복원 실패: 트러블슈팅 (4)의 복구 명령을 실행하세요." >&2
+  echo "실험 설정 복원 실패: 트러블슈팅 (5)의 복구 명령을 실행하세요." >&2
   false
 fi
 echo "Prewarmed=1, STARTUP_DELAY_SECONDS 삭제 완료"
@@ -714,10 +721,14 @@ echo "[09] load_to_first_response_seconds가 주 비교 지표이며 단일 실�
 
 ```text
 trial	instance	load_started_at	first_seen_at	load_to_first_response_seconds	started_at	first_response_age
-Prewarmed=0	a2b002c6	2026-07-25T07:00:00Z	2026-07-25T07:01:08Z	68	2026-07-25T07:00:07Z	61
-Prewarmed=0	5bef3ff3	2026-07-25T07:00:00Z	2026-07-25T07:01:16Z	76	2026-07-25T07:00:15Z	61
-Prewarmed=4	69e069d8	2026-07-25T07:15:00Z	2026-07-25T07:16:02Z	62	2026-07-25T07:15:01Z	61
-Prewarmed=4	9b19c4d6	2026-07-25T07:15:00Z	2026-07-25T07:16:03Z	63	2026-07-25T07:15:02Z	61
+Prewarmed=0	d09f4aa4	2026-07-25T07:52:43Z	2026-07-25T07:53:34Z	51	2026-07-25T07:52:57Z	37
+Prewarmed=0	c0b2201f	2026-07-25T07:52:43Z	2026-07-25T07:53:43Z	60	2026-07-25T07:53:07Z	36
+Prewarmed=0	dbaea6a9	2026-07-25T07:52:43Z	2026-07-25T07:53:51Z	68	2026-07-25T07:53:14Z	37
+Prewarmed=0	5bef3ff3	2026-07-25T07:52:43Z	2026-07-25T07:53:51Z	68	2026-07-25T07:53:18Z	33
+Prewarmed=4	69e069d8	2026-07-25T08:10:35Z	2026-07-25T08:11:29Z	54	2026-07-25T08:10:50Z	39
+Prewarmed=4	8e0e812d	2026-07-25T08:10:35Z	2026-07-25T08:11:29Z	54	2026-07-25T08:10:53Z	36
+Prewarmed=4	5d90b391	2026-07-25T08:10:35Z	2026-07-25T08:11:29Z	54	2026-07-25T08:10:50Z	39
+Prewarmed=4	3122a953	2026-07-25T08:10:35Z	2026-07-25T08:11:36Z	61	2026-07-25T08:10:59Z	37
 [09] load_to_first_response_seconds가 주 비교 지표이며 단일 실행의 우위를 보장하지 않습니다.
 ```
 
@@ -748,9 +759,11 @@ jq -s -r '
 
 ```text
 trial	samples	min_load_delay	max_load_delay	range
-Prewarmed=0	4	68	84	16
-Prewarmed=4	4	62	70	8
+Prewarmed=0	4	51	68	17
+Prewarmed=4	4	54	61	7
 ```
+
+이 실행에서 Prewarmed=4의 최소 지연 54초는 Prewarmed=0의 51초보다 3초 늦었지만, 최대 지연은 68초에서 61초로 7초 줄었고 범위는 17초에서 7초로 좁아졌습니다. 평균도 61.8초에서 55.8초로 약 6초 감소했습니다. 따라서 “모든 instance가 더 빨랐다”가 아니라 **새 capacity의 응답 투입이 더 조밀하고 최악 지연이 낮아졌다**는 관찰로 해석합니다.
 
 ### 무엇이 Prewarmed의 이점인가
 
@@ -760,7 +773,7 @@ Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.micros
 
 1. instance 표의 `load_started_at`을 두 시험의 시간 원점으로 사용합니다.
 2. `load_to_first_response_seconds`의 최솟값과 최댓값으로 첫·마지막 새 instance 응답 투입 시점을 비교합니다.
-3. `first_response_age`가 약 60초인지 확인하여 인위적인 시작 지연이 적용됐는지 봅니다.
+3. `first_response_age`가 약 60초인지 확인하여 의도한 인위적 시작 지연이 적용됐는지 봅니다. 약 30–40초라면 이전 30초 상한 앱이 배포된 상태이므로 60초 실험으로 해석하지 않습니다.
 4. `InstanceCount`가 증가한 `metric_timestamp`를 보조적으로 나란히 놓되 정확한 activation 시각으로 해석하지 않습니다.
 
 Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST API 이름은 `InstanceCount`입니다. 이 메트릭은 앱이 실행되는 VM 수를 나타내며 배포된 Prewarmed instance를 포함할 수 있지만, 개별 instance의 active/Prewarmed 상태나 instance ID는 제공하지 않습니다. 또한 `PT1M` Average 집계와 Azure Monitor 수집 지연이 있으므로 `metric_timestamp`를 Azure 내부의 정확한 activation 시각으로 해석할 수 없습니다. 응답에서 관찰된 instance 수가 적다는 사실도 capacity 효율 향상을 의미하지 않습니다. 이 타임라인은 부하 중 전체 capacity 변화 흐름을 이해하기 위한 보조 증거이며 Prewarmed 효과의 인과관계 증명은 아닙니다.
@@ -769,7 +782,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 - Trial B의 `min_load_delay`가 낮으면 첫 warmed capacity가 Trial A보다 빨리 응답에 투입된 관찰입니다.
 - Trial B의 `max_load_delay`와 `range`가 낮으면 여러 새 instance의 응답 투입이 더 이르고 조밀하게 나타난 관찰입니다.
-- 두 시험의 `first_response_age`가 모두 약 60초라면 동일한 인위적 cold-start floor가 적용된 것입니다.
+- 두 시험의 `first_response_age`가 모두 약 60초라면 동일한 의도된 cold-start floor가 적용된 것입니다. 모두 약 30–40초라면 A/B 조건은 같지만 이전 30초 상한 앱으로 실행된 것이므로 최신 앱 재배포 후 반복해야 합니다.
 - 두 시험 결과가 비슷해도 실행 실패는 아닙니다. 플랫폼 내부 할당 시점, 부하 분산, 수집 시점의 변동이 단일 실행의 차이를 가릴 수 있습니다.
 - `InstanceCount`는 두 시험 모두 최종 5까지 증가했는지 확인하는 보조 증거이며, `PT1M` Average와 게시 지연 때문에 내부 scale-out 속도 자체를 판정하는 지표가 아닙니다.
 
@@ -783,7 +796,7 @@ Azure Portal의 표시 이름은 **Automatic Scaling Instance Count**이고 REST
 
 - 새 Cloud Shell에서 시작했다면 먼저 0단계에서 `SUFFIX`와 Azure 리소스 변수를 다시 맞춘 뒤, 공통 상태에서 `REPO_DIR`가 `~/ms-appservice-basic-workshop01`로 고정되었는지 확인합니다.
 - `STARTUP_DELAY_SECONDS=60` 적용 후 `/health`가 정상 응답했는지 확인합니다.
-- 트러블슈팅 (4)의 복구 명령을 실행한 뒤, 4단계의 단일 인스턴스 게이트에서 새 1분 메트릭 두 개가 연속으로 `1`인지 다시 확인하고 2단계부터 재실행합니다.
+- 트러블슈팅 (5)의 복구 명령을 실행한 뒤, 4단계의 단일 인스턴스 게이트에서 새 1분 메트릭 두 개가 연속으로 `1`인지 다시 확인하고 2단계부터 재실행합니다.
 - 같은 `hey -z 180s -c 100 -q 10` 부하를 다시 걸어도 결과가 같은지 확인합니다.
 - Portal의 **Monitoring > Metrics > Automatic Scaling Instance Count** 또는 아래 메트릭 조회로 시험 시간대 `InstanceCount` 변화를 함께 확인합니다.
 
@@ -802,7 +815,7 @@ az monitor metrics list \
 
 ### (2) 단일 인스턴스로 축소되지 않음
 
-시험 A 뒤 4단계의 단일 인스턴스 게이트가 약 15분 안에 통과하지 못하면 시험 B를 실행하지 말고, 트러블슈팅 (4)의 복구 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
+시험 A 뒤 4단계의 단일 인스턴스 게이트가 약 15분 안에 통과하지 못하면 시험 B를 실행하지 말고, 트러블슈팅 (5)의 복구 명령으로 **Prewarmed=1 + `STARTUP_DELAY_SECONDS` 삭제**를 먼저 적용한 뒤 멈추세요. Cloud Shell은 유지한 채 기다렸다가, 다시 시도할 때는 2단계부터 재실행하세요.
 
 ```bash
 # 1분 Average가 늦게 내려갈 수 있으므로, 같은 최근 10분 진단 조회를 1분 간격으로 5번 반복해 scale-in 진행 여부를 추적합니다.
@@ -825,7 +838,25 @@ Always-ready 값이 1보다 크면 그 아래로는 줄지 않으며, 같은 Pla
 
 이는 오류가 아닙니다. Prewarmed는 내부 할당·라우팅 시점과 부하 패턴에 따라 단일 실행에서 차이가 작을 수 있습니다. `first_response_age`가 약 60초인지 먼저 확인하고, 부하 기준 최솟값·최댓값·범위를 반복 실행의 관찰값으로 기록합니다.
 
-### (4) 실패 후 기본 상태 복구
+### (4) `first_response_age`가 60초보다 짧음
+
+두 시험의 `first_response_age`가 모두 약 30–40초라면 App Service 앱 설정은 60이지만, Azure에 배포된 `app.py`가 시작 지연을 최대 30초로 제한하는 이전 버전일 가능성이 높습니다. GitHub 저장소 업데이트는 이미 배포된 Web App 코드를 자동으로 바꾸지 않습니다.
+
+```bash
+# 최신 저장소 코드가 시작 지연을 60초까지 허용하는지 확인한 뒤 프로덕션 앱에 다시 배포합니다.
+if ! grep -q '_clamp(value, 60)' "$REPO_DIR/app/app.py"; then
+  echo "현재 저장소의 app.py가 60초 시작 지연을 지원하지 않습니다. git pull 후 다시 확인하세요." >&2
+  false
+fi
+cd "$REPO_DIR/app" &&
+zip -r /tmp/app-module09.zip . -x "tests/*" -x "__pycache__/*" -x "*.pyc" &&
+az webapp deploy -g "$RG" -n "$APP" \
+  --src-path /tmp/app-module09.zip --type zip --track-status
+```
+
+배포가 완료되면 트러블슈팅 (5)의 복구 명령으로 현재 실험 설정을 정리하고, 2단계부터 다시 실행합니다. `first_response_age`가 약 60초로 관찰될 때 의도한 실험 조건이 성립합니다.
+
+### (5) 실패 후 기본 상태 복구
 
 Trial A 또는 B가 중간에 실패했거나 5단계의 실험 설정 정리가 완료되지 않았다면 다음 모듈로 넘어가지 말고 아래 복구 명령을 실행합니다. 이 명령은 현재 상태와 관계없이 Prewarmed를 1로 맞추고 실험용 시작 지연을 삭제합니다.
 
@@ -846,7 +877,7 @@ if [ "$(az monitor autoscale list -g "$RG" --query "length([?name=='$AUTOSCALE']
   echo "Plan의 Autoscale 설정 제거 실패" >&2
   false
 else
-  # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (6) 참고).
+  # P0v4(Premium v4)는 az CLI의 elastic 설정 플래그가 아직 지원하지 않아 az rest를 사용합니다(트러블슈팅 (7) 참고).
   az rest --method patch \
     --uri "${PLAN_ID}?api-version=2024-11-01" \
     --body '{"sku":{"name":"P0v4","tier":"PremiumV4","size":"P0v4","family":"Pv4","capacity":1},"properties":{"elasticScaleEnabled":true,"maximumElasticWorkerCount":5}}' \
@@ -866,7 +897,7 @@ az webapp config appsettings delete -g "$RG" -n "$APP" \
 # 복구 명령이 오류 없이 끝나면 5단계의 결과 해석으로 돌아갑니다.
 ```
 
-### (5) hey 설치 실패
+### (6) hey 설치 실패
 
 `go install`은 GitHub에서 소스를 받아 빌드하므로 네트워크 일시 장애일 수 있습니다. 잠시 후 재시도하고, PATH에 `$HOME/go/bin`이 포함되어 있는지 확인합니다.
 
@@ -876,7 +907,7 @@ export PATH=$HOME/go/bin:$PATH
 command -v hey
 ```
 
-### (6) Premium V2/V3 SKU만 지원한다는 오류
+### (7) Premium V2/V3 SKU만 지원한다는 오류
 
 ```text
 --number-of-workers and --elastic-scale can only be used on premium V2/V3 or workflow SKUs.
