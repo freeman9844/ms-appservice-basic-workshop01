@@ -28,7 +28,7 @@ def _format_utc(value):
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def parse_sample(payload, observed_at):
+def parse_sample(payload, observed_at, load_started_at):
     if not isinstance(payload, dict):
         return None
     instance = payload.get("instance")
@@ -42,13 +42,15 @@ def parse_sample(payload, observed_at):
     except ValueError:
         return None
     age = int((observed_at - started).total_seconds())
-    if age < 0:
+    load_delay = int((observed_at - load_started_at).total_seconds())
+    if age < 0 or load_delay < 0:
         return None
     return {
         "instance": instance,
         "started_at": _format_utc(started),
         "first_seen_at": _format_utc(observed_at),
         "first_response_age": age,
+        "load_to_first_response_seconds": load_delay,
     }
 
 
@@ -83,7 +85,14 @@ def fetch(url, timeout):
         return None
 
 
-def _observe_threaded(url, baseline_instance, duration, concurrency, request_timeout):
+def _observe_threaded(
+    url,
+    baseline_instance,
+    load_started_at,
+    duration,
+    concurrency,
+    request_timeout,
+):
     deadline = time.monotonic() + duration
     store = ObservationStore(baseline_instance)
     pool = ThreadPoolExecutor(max_workers=concurrency)
@@ -104,11 +113,17 @@ def _observe_threaded(url, baseline_instance, duration, concurrency, request_tim
                         payload = future.result(timeout=remaining)
                     except Exception:
                         continue
-                    sample = parse_sample(payload, datetime.now(timezone.utc))
+                    sample = parse_sample(
+                        payload,
+                        datetime.now(timezone.utc),
+                        load_started_at,
+                    )
                     if store.add(sample):
                         print(
-                            f"{sample['instance']}\t{sample['started_at']}\t"
-                            f"{sample['first_seen_at']}\t{sample['first_response_age']}",
+                            f"{sample['instance']}\t{_format_utc(load_started_at)}\t"
+                            f"{sample['first_seen_at']}\t"
+                            f"{sample['load_to_first_response_seconds']}\t"
+                            f"{sample['started_at']}\t{sample['first_response_age']}",
                             flush=True,
                         )
             except FutureTimeoutError:
@@ -128,7 +143,15 @@ class ObservationExecutionError(RuntimeError):
     pass
 
 
-def _observe_child(connection, url, baseline_instance, duration, concurrency, request_timeout):
+def _observe_child(
+    connection,
+    url,
+    baseline_instance,
+    load_started_at,
+    duration,
+    concurrency,
+    request_timeout,
+):
     try:
         connection.send(("started", None))
         connection.send(
@@ -137,6 +160,7 @@ def _observe_child(connection, url, baseline_instance, duration, concurrency, re
                 _observe_threaded(
                     url,
                     baseline_instance,
+                    load_started_at,
                     duration,
                     concurrency,
                     request_timeout,
@@ -167,7 +191,14 @@ def _terminate_and_reap(process):
         raise ObservationExecutionError("observation child could not be reaped")
 
 
-def observe(url, baseline_instance, duration, concurrency, request_timeout):
+def observe(
+    url,
+    baseline_instance,
+    load_started_at,
+    duration,
+    concurrency,
+    request_timeout,
+):
     context = _multiprocessing_context()
     parent_connection, child_connection = context.Pipe(duplex=False)
     process = context.Process(
@@ -176,6 +207,7 @@ def observe(url, baseline_instance, duration, concurrency, request_timeout):
             child_connection,
             url,
             baseline_instance,
+            load_started_at,
             duration,
             concurrency,
             request_timeout,
@@ -245,6 +277,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
     parser.add_argument("--baseline-instance", required=True)
+    parser.add_argument("--load-started-at", required=True)
     parser.add_argument("--duration", type=int, default=180)
     parser.add_argument("--concurrency", type=int, default=30)
     parser.add_argument("--request-timeout", type=float, default=5)
@@ -259,12 +292,25 @@ def main(argv=None):
     if not args.baseline_instance.strip():
         print("baseline-instance must not be empty or whitespace", file=sys.stderr)
         return 1
+    try:
+        load_started_at = _utc(args.load_started_at)
+    except ValueError:
+        print(
+            "load-started-at must be an ISO-8601 timestamp with timezone",
+            file=sys.stderr,
+        )
+        return 1
 
-    print("instance\tstarted_at\tfirst_seen_at\tfirst_response_age", flush=True)
+    print(
+        "instance\tload_started_at\tfirst_seen_at\t"
+        "load_to_first_response_seconds\tstarted_at\tfirst_response_age",
+        flush=True,
+    )
     try:
         observations = observe(
             args.url,
             args.baseline_instance,
+            load_started_at,
             args.duration,
             args.concurrency,
             args.request_timeout,
@@ -273,7 +319,14 @@ def main(argv=None):
         print(f"observation failed: {error}", file=sys.stderr)
         return 1
     try:
-        args.output.write_text(json.dumps(observations, indent=2) + "\n", encoding="utf-8")
+        payload = {
+            "load_started_at": _format_utc(load_started_at),
+            "observations": observations,
+        }
+        args.output.write_text(
+            json.dumps(payload, indent=2) + "\n",
+            encoding="utf-8",
+        )
     except OSError as error:
         print(f"failed to write {args.output}: {error}", file=sys.stderr)
         return 1
