@@ -777,7 +777,7 @@ Prewarmed=4	4	54	55.8	61	7
 
 Microsoft Learn의 [Automatic scaling in Azure App Service](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)는 Prewarmed instance를 HTTP scale·activation에 사용하는 **warmed capacity buffer**로 설명합니다. 앱이 유휴 상태일 때 설정값만큼 항상 실행해 두는 방식이 아니라, HTTP 요청으로 활성 instance가 사용되기 시작하면 buffer를 할당하고 활성 capacity가 증가할 때 다시 채우는 rolling 방식입니다.
 
-따라서 이 실험은 “설정한 4개가 부하 전에 모두 대기했는가”가 아니라, 부하가 들어온 뒤 신규 capacity가 실제 응답에 얼마나 빠르고 고르게 투입됐는지를 비교합니다. 할당된 Prewarmed instance는 초 단위 과금 대상이므로 실험 후 기본값 1로 복원합니다.
+따라서 이 실험은 “설정한 4개가 부하 전에 모두 대기했는가”가 아니라, 부하가 들어온 뒤 신규 capacity가 실제 응답에 얼마나 빠르고 고르게 투입됐는지를 비교합니다. Microsoft는 대부분의 운영 시나리오에서 기본값 1을 유지하도록 권장합니다. 할당된 Prewarmed instance는 초 단위 과금 대상이므로 실험용 4는 결과 확인 후 기본값 1로 복원합니다.
 
 ### 해석 시 주의사항
 
