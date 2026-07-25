@@ -148,10 +148,42 @@ flowchart LR
 
 ## 참고 자료
 
-- [Azure App Service 개요](https://learn.microsoft.com/azure/app-service/overview)
-- [Premium v4 계층 구성 및 지원 리전](https://learn.microsoft.com/azure/app-service/app-service-configure-premium-v4-tier)
-- [배포 슬롯](https://learn.microsoft.com/azure/app-service/deploy-staging-slots)
-- [Automatic scaling](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling)
-- [진단 로그](https://learn.microsoft.com/azure/app-service/troubleshoot-diagnostic-logs)
-- [Easy Auth (인증·권한 부여)](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization)
-- [사이드카 컨테이너](https://learn.microsoft.com/azure/app-service/overview-sidecar)
+### App Service 핵심 (Microsoft Learn)
+
+- [Azure App Service 개요](https://learn.microsoft.com/azure/app-service/overview) — 모듈 02에서 만드는 Web App과 App Service Plan의 기본 구조를 설명합니다.
+- [Premium v4 계층 구성 및 지원 리전](https://learn.microsoft.com/azure/app-service/app-service-configure-premium-v4-tier) — 모듈 02·09의 P0v4 리전 제약과 Premium v4 구성을 확인할 수 있습니다.
+- [App Service 환경 변수와 앱 설정](https://learn.microsoft.com/azure/app-service/reference-app-settings) — 모듈 04·05·08·09에서 사용하는 앱 설정과 슬롯 설정의 동작을 설명합니다.
+
+### 배포·슬롯·트래픽 (Microsoft Learn)
+
+- [Azure App Service에 파일 배포](https://learn.microsoft.com/azure/app-service/deploy-zip) — 모듈 03의 ZIP 배포와 Oryx 빌드 흐름을 확인할 수 있습니다.
+- [App Service 배포 슬롯 설정](https://learn.microsoft.com/azure/app-service/deploy-staging-slots) — 모듈 05·06의 슬롯 생성, swap, 트래픽 라우팅 동작을 설명합니다.
+- [App Service에서 Python 앱 구성](https://learn.microsoft.com/azure/app-service/configure-language-python) — 모듈 03의 Python 런타임, 시작 명령, 배포 문제를 이해하는 배경 문서입니다.
+
+### 확장·성능 (Microsoft Learn)
+
+- [Azure Monitor Autoscale 개요](https://learn.microsoft.com/azure/azure-monitor/autoscale/autoscale-overview) — 모듈 07의 CPU 규칙 기반 scale-out과 profile 동작을 설명합니다.
+- [Azure App Service Automatic Scaling](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling) — 모듈 09의 앱 단위 Automatic Scaling과 Always-ready 설정을 설명합니다.
+- [Automatic Scaling의 Prewarmed 인스턴스 설정](https://learn.microsoft.com/azure/app-service/manage-automatic-scaling#update-prewarmed-instances) — 모듈 09의 Prewarmed 0 대 1 실험 배경과 설정 범위를 확인할 수 있습니다.
+- [Azure App Service 모니터링](https://learn.microsoft.com/azure/app-service/monitor-app-service) — 모듈 07·09에서 사용하는 CPU와 instance count 메트릭을 확인할 수 있습니다.
+
+### 관찰 가능성·복구 (Microsoft Learn)
+
+- [Application Insights 자동 계측](https://learn.microsoft.com/azure/azure-monitor/app/codeless-overview) — 모듈 08의 관리형 에이전트와 `AppRequests` 수집 방식을 설명합니다.
+- [Azure App Service 진단 로그](https://learn.microsoft.com/azure/app-service/troubleshoot-diagnostic-logs) — 모듈 03·08에서 배포 및 HTTP 로그를 수집하고 조회하는 방법을 설명합니다.
+- [App Service Health Check](https://learn.microsoft.com/azure/app-service/monitor-instances-health-check) — 모듈 05·09에서 앱 준비 상태와 비정상 인스턴스를 판단하는 기준을 설명합니다.
+- [Web Apps 구성 업데이트 REST API](https://learn.microsoft.com/rest/api/appservice/web-apps/update-configuration?view=rest-appservice-2024-11-01) — 모듈 12의 `autoHealEnabled`와 `autoHealRules` 구성을 확인할 수 있습니다.
+
+### 인증·사이드카 (Microsoft Learn)
+
+- [App Service 인증 및 권한 부여](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization) — 모듈 10의 Easy Auth 요청 처리와 인증 흐름을 설명합니다.
+- [Microsoft Entra 인증 공급자 구성](https://learn.microsoft.com/azure/app-service/configure-authentication-provider-aad) — 모듈 10의 앱 등록, 리디렉션 URI, 인증 공급자 설정 절차를 설명합니다.
+- [Azure App Service 사이드카 개요](https://learn.microsoft.com/azure/app-service/overview-sidecar) — 모듈 11의 Redis 사이드카 수명 주기와 네트워크 동작을 설명합니다.
+
+### CLI·REST·부하 도구
+
+- [`az webapp` CLI 레퍼런스](https://learn.microsoft.com/cli/azure/webapp) — 모듈 02–13에서 사용하는 Web App 생성, 구성, 배포, 인증 명령을 확인할 수 있습니다.
+- [`az appservice plan` CLI 레퍼런스](https://learn.microsoft.com/cli/azure/appservice/plan) — 모듈 02·07·09의 Plan 생성과 확장 관련 명령을 확인할 수 있습니다.
+- [`az monitor autoscale` CLI 레퍼런스](https://learn.microsoft.com/cli/azure/monitor/autoscale) — 모듈 07·09의 Autoscale profile 생성, 조회, 삭제 명령을 확인할 수 있습니다.
+- [`az rest`로 Azure REST API 호출](https://learn.microsoft.com/cli/azure/use-azure-cli-rest-command) — 모듈 09·11·12에서 CLI가 지원하지 않는 최신 App Service 설정을 적용하는 방법을 설명합니다.
+- [`hey` HTTP 부하 생성기](https://github.com/rakyll/hey) — 모듈 07·09의 반복 요청과 burst 부하 옵션을 확인할 수 있는 upstream 문서입니다.
