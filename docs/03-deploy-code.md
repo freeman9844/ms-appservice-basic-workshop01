@@ -70,15 +70,35 @@ az webapp config appsettings set -g $RG -n $APP \
 
 > 👁️ **개념 — Oryx 빌드**
 >
-> `SCM_DO_BUILD_DURING_DEPLOYMENT=true`를 설정하면 Azure가 zip 안의 `requirements.txt`를 읽어 **서버 측 pip install**을 수행합니다.
-> 빌드 완료 후 `app.py`의 `app` 객체를 **gunicorn**으로 자동 기동합니다.
-> 첫 빌드는 패키지 다운로드 포함 **1–3분**, 이후 콜드스타트 추가 수십 초가 소요될 수 있습니다.
+> Oryx는 App Service가 소스 기반 배포 패키지를 실행 가능한 Python 앱으로 준비하는 빌드 시스템입니다. `SCM_DO_BUILD_DURING_DEPLOYMENT=true`는 의존성을 zip에 미리 포함하는 대신, 배포 중 App Service 서버에서 다음 과정을 수행하도록 설정합니다.
+>
+> 1. **애플리케이션 감지** — zip 최상위의 `requirements.txt`와 `app.py`를 찾아 Python 앱으로 인식합니다.
+> 2. **의존성 설치** — 빌드 환경에서 `pip install -r requirements.txt`를 실행해 필요한 패키지를 설치합니다.
+> 3. **배포 결과 생성** — 설치된 의존성과 앱 소스를 실행 가능한 배포 결과로 만들고 시작 스크립트를 준비합니다.
+> 4. **애플리케이션 시작** — Linux App Service가 gunicorn으로 `app.py`의 Flask `app` 객체를 실행합니다.
+>
+> 첫 빌드는 패키지 다운로드와 환경 준비를 포함해 **1–3분**, 이후 콜드스타트에 추가 수십 초가 걸릴 수 있습니다.
 
 ---
 
 ## 2단계 — zip 아카이브 생성 및 배포
 
 배포할 애플리케이션은 Python **Flask 기반의 v1 웹앱**입니다. 홈 화면과 함께 상태 확인용 `/health`, 앱 버전·슬롯·인스턴스 정보를 반환하는 `/api/info` 엔드포인트를 제공하며, 이후 모듈에서 앱 설정·슬롯 스왑·트래픽 분할·자동 스케일 동작을 관찰하는 데 사용합니다.
+
+👁️ **배포할 애플리케이션 구조**
+
+```text
+app/
+├── app.py
+└── requirements.txt
+```
+
+| 파일 | 역할 |
+|------|------|
+| `app.py` | Flask 앱과 홈 화면을 정의하고 `/health`, `/api/info`, 이후 모듈에서 사용하는 `/load`, `/slow`, `/cache` 엔드포인트를 제공합니다. |
+| `requirements.txt` | Oryx가 설치할 Flask, gunicorn, Redis Python 클라이언트의 버전 범위를 정의합니다. |
+
+아래 명령은 `app/` 디렉터리 안에서 zip을 생성하므로 `app.py`와 `requirements.txt`가 zip 최상위에 들어갑니다. Oryx는 이 위치에서 애플리케이션과 의존성 파일을 감지합니다.
 
 `app.py`와 의존성 목록인 `requirements.txt`를 zip 파일로 묶어 App Service에 배포합니다.
 
