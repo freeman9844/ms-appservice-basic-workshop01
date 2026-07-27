@@ -26,7 +26,8 @@ flowchart LR
 
 ---
 
-## 0단계 — (선택) 변수 재설정
+<details>
+<summary>🔄 0단계 — 변수 재설정 (새 터미널/세션에서 시작하는 경우)</summary>
 
 > ⏭️ **02 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
 > 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
@@ -52,6 +53,8 @@ echo "APP_URL=$APP_URL"
 ```
 APP_URL=https://app-appsvcworkshop-<SUFFIX>.azurewebsites.net
 ```
+
+</details>
 
 ---
 
