@@ -74,8 +74,8 @@ az webapp config appsettings set -g $RG -n $APP \
 >
 > 1. **애플리케이션 감지** — zip 최상위의 `requirements.txt`와 `app.py`를 찾아 Python 앱으로 인식합니다.
 > 2. **의존성 설치** — 빌드 환경에서 `pip install -r requirements.txt`를 실행해 필요한 패키지를 설치합니다.
-> 3. **배포 결과 생성** — 설치된 의존성과 앱 소스를 실행 가능한 배포 결과로 만들고 시작 스크립트를 준비합니다.
-> 4. **애플리케이션 시작** — Linux App Service가 gunicorn으로 `app.py`의 Flask `app` 객체를 실행합니다.
+> 3. **배포 결과 생성** — 설치된 의존성과 앱 소스를 런타임 컨테이너가 사용할 배포 결과로 준비합니다.
+> 4. **애플리케이션 시작** — 컨테이너 시작 시 Linux App Service가 `app.py`를 감지하고 gunicorn의 `app:app` 대상으로 Flask 앱을 실행합니다.
 >
 > 첫 빌드는 패키지 다운로드와 환경 준비를 포함해 **1–3분**, 이후 콜드스타트에 추가 수십 초가 걸릴 수 있습니다.
 
