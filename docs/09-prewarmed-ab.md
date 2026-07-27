@@ -19,7 +19,8 @@
 - 종료 전에 Prewarmed를 기본값 1로 되돌리고 실험용 시작 지연을 삭제합니다.
 - 모듈 종료 상태: **Automatic scaling 활성(Always ready 1·Prewarmed 1·Maximum burst 5), prod = v2** (이후 모듈에서 이 상태가 유지됩니다).
 
-## 0단계 — (선택) 변수 재설정
+<details>
+<summary>🔄 0단계 — 변수 재설정 (새 터미널/세션에서 시작하는 경우)</summary>
 
 > ⏭️ **07 모듈에서 이어서 같은 터미널로 진행 중이라면 이 단계는 건너뛰세요.**
 > 새 터미널 세션을 열었거나 Cloud Shell이 재시작되어 변수가 사라진 경우에만 실행합니다.
@@ -37,6 +38,8 @@ APP=app-appsvcworkshop-$SUFFIX
 LAW=log-appsvcworkshop-$SUFFIX
 APPI=appi-appsvcworkshop-$SUFFIX
 ```
+
+</details>
 
 ---
 
