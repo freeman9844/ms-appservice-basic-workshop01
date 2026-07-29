@@ -101,7 +101,7 @@ az extension add --name log-analytics --upgrade --only-show-errors
 
 ```bash
 # 워크숍 리포지토리를 복제하고 작업 디렉터리로 이동합니다.
-git clone https://github.com/jungwoonlee_microsoft/ms-appservice-basic-workshop01.git
+git clone https://github.com/freeman9844/ms-appservice-basic-workshop01.git
 cd ms-appservice-basic-workshop01
 ```
 
